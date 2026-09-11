@@ -1,0 +1,21 @@
+# CMake build output
+build/
+build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+
+# Qt Creator
+.qtcreator/
+CMakeLists.txt.user
+CMakeLists.txt.user.*
+*.autosave
+
+# Windows / MSVC
+*.obj
+*.exe
+*.pdb
+*.ilk
+out/
