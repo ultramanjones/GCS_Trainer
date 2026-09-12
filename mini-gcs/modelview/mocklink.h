@@ -19,9 +19,8 @@
 //   sends ONE signal, 20 times a second.
 //
 // Sending 20 times instead of 50 is called coalescing. The screen
-// never needed 50 updates a second. Nobody can see a number change
-// that fast, and every extra update costs real work on the thread
-// that draws the window.
+// does not need 50 updates a second, and every extra update costs
+// real work on the thread that draws the window.
 class MockLink : public LinkInterface
 {
     Q_OBJECT

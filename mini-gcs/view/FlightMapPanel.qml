@@ -29,31 +29,48 @@ Rectangle {
     property real vehicleEastMeters: 0
     property real vehicleNorthMeters: 0
     property real vehicleHeadingDegrees: 0
-    property var breadcrumbTrail: []
+    property var groundTrack: []
 
     // The view model counts up by one every time there is something
     // new to draw. Watching one number is cheaper than watching a
     // whole list.
-    property int mapRevisionNumber: flightMapViewModel.mapRevisionNumber
+    property int mapRevisionNumber: vehicleGroundTrackViewModel.mapRevisionNumber
 
     onMapRevisionNumberChanged: {
-        vehicleEastMeters = flightMapViewModel.vehicleEastMetersFromHome
-        vehicleNorthMeters = flightMapViewModel.vehicleNorthMetersFromHome
-        vehicleHeadingDegrees = flightMapViewModel.vehicleHeadingDegrees
-        breadcrumbTrail = flightMapViewModel.breadcrumbTrailPoints()
+        vehicleEastMeters = vehicleGroundTrackViewModel.vehicleEastMetersFromHome
+        vehicleNorthMeters = vehicleGroundTrackViewModel.vehicleNorthMetersFromHome
+        vehicleHeadingDegrees = vehicleGroundTrackViewModel.vehicleHeadingDegrees
+        groundTrack = vehicleGroundTrackViewModel.groundTrackPoints()
+        followTheVehicle()
         flightMapCanvas.requestPaint()
     }
 
-    // How much ground fits on screen, measured from the middle of the
-    // view out to an edge.
+    // The map follows the aircraft. The aircraft stays in the middle
+    // and the ground slides underneath it.
+    //
+    // This is what QGroundControl does. Its Fly View map auto-centers
+    // on the vehicle, and if you drag the map by hand it re-centers on
+    // the vehicle again after a moment. A ground station map that
+    // stays put is only usable until the aircraft flies past the edge,
+    // which does not take long.
+    //
+    // Source: QGroundControl user guide, Fly View.
+    // https://docs.qgroundcontrol.com/master/en/qgc-user-guide/fly_view/fly_view.html
+    property real viewCenterEastMeters: 0
+    property real viewCenterNorthMeters: 0
+
+    // How much ground fits on screen, measured from the middle out to
+    // the nearer edge. The wider side of the panel shows more than
+    // this. At 340 a panel this shape shows a bit over a kilometer
+    // across, which holds the whole practice pattern with room left.
     readonly property real halfRangeMeters: 340
 
-    // The middle of the view, in meters east and north of the launch
-    // point. It sits north of home because the practice pattern does.
-    // Centered on the racetrack the aircraft actually flies, so the
-    // whole pattern and the launch point are all on screen at once.
-    readonly property real viewCenterEastMeters: 110
-    readonly property real viewCenterNorthMeters: 155
+    function followTheVehicle() {
+        viewCenterEastMeters = vehicleEastMeters
+        viewCenterNorthMeters = vehicleNorthMeters
+    }
+
+    Component.onCompleted: followTheVehicle()
 
     Canvas {
         id: flightMapCanvas
@@ -135,7 +152,7 @@ Rectangle {
             }
 
             // The trail of places the aircraft has already been.
-            var trailPoints = flightMapPanel.breadcrumbTrail
+            var trailPoints = flightMapPanel.groundTrack
             if (trailPoints && trailPoints.length > 1) {
                 drawingContext.strokeStyle = GcsTheme.mapTrailColor
                 drawingContext.lineWidth = 2
@@ -213,8 +230,8 @@ Rectangle {
         horizontalAlignment: Text.AlignRight
         color: GcsTheme.dimTextColor
         font.pixelSize: 12
-        text: flightMapViewModel.vehicleLatitudeDegrees.toFixed(6)
-              + ",  " + flightMapViewModel.vehicleLongitudeDegrees.toFixed(6)
+        text: vehicleGroundTrackViewModel.vehicleLatitudeDegrees.toFixed(6)
+              + ",  " + vehicleGroundTrackViewModel.vehicleLongitudeDegrees.toFixed(6)
     }
 
     Button {
@@ -226,8 +243,8 @@ Rectangle {
         height: 30
         text: "Clear trail"
         onClicked: {
-            flightMapViewModel.clearBreadcrumbTrail()
-            flightMapPanel.breadcrumbTrail = []
+            vehicleGroundTrackViewModel.clearGroundTrack()
+            flightMapPanel.groundTrack = []
             flightMapCanvas.requestPaint()
         }
 

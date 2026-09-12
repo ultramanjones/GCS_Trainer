@@ -1,16 +1,20 @@
 #include "viewmodel/vehiclestatusviewmodel.h"
 
-#include <QDateTime>
 #include <QtMath>
 
-VehicleStatusViewModel::VehicleStatusViewModel(QObject *parent)
+#include "modelview/groundcontrolstation.h"
+#include "modelview/mapvehicle.h"
+
+VehicleStatusViewModel::VehicleStatusViewModel(GroundControlStation *groundControlStation,
+                                               QObject *parent)
     : QObject(parent)
-    , m_linkAgeTimer(this)
+    , m_groundControlStation(groundControlStation)
+    , m_reportAgeTimer(this)
 {
-    m_linkAgeTimer.setInterval(1000);
-    connect(&m_linkAgeTimer, &QTimer::timeout,
-            this, &VehicleStatusViewModel::updateLinkAgeAndStaleFlag);
-    m_linkAgeTimer.start();
+    m_reportAgeTimer.setInterval(1000);
+    connect(&m_reportAgeTimer, &QTimer::timeout,
+            this, &VehicleStatusViewModel::refreshReportAge);
+    m_reportAgeTimer.start();
 }
 
 QString VehicleStatusViewModel::flightModeName() const { return m_flightModeName; }
@@ -20,18 +24,16 @@ int VehicleStatusViewModel::radioSignalPercent() const { return m_radioSignalPer
 int VehicleStatusViewModel::batteryPercent() const { return m_batteryPercent; }
 double VehicleStatusViewModel::altitudeMetersAboveHome() const { return m_altitudeMetersAboveHome; }
 double VehicleStatusViewModel::airspeedMetersPerSecond() const { return m_airspeedMetersPerSecond; }
-double VehicleStatusViewModel::groundspeedMetersPerSecond() const { return m_groundspeedMetersPerSecond; }
 double VehicleStatusViewModel::rollDegrees() const { return m_rollDegrees; }
 double VehicleStatusViewModel::pitchDegrees() const { return m_pitchDegrees; }
 double VehicleStatusViewModel::headingDegrees() const { return m_headingDegrees; }
-int VehicleStatusViewModel::secondsSinceLastSnapshot() const { return m_secondsSinceLastSnapshot; }
-bool VehicleStatusViewModel::isLinkStale() const { return m_isLinkStale; }
+int VehicleStatusViewModel::secondsSinceLastReport() const { return m_secondsSinceLastReport; }
+bool VehicleStatusViewModel::isOutOfContact() const { return m_isOutOfContact; }
 
 QString VehicleStatusViewModel::gpsFixDescription() const
 {
-    // Turning a number into words for the screen is viewmodel work.
-    // It organizes data into the exact shape the view shows. The view
-    // never has to learn what a 3 means.
+    // Turning a number into words for the screen is organizing, which
+    // is this layer's job. The view never has to learn what a 3 means.
     switch (m_gpsFixType) {
     case 3:  return QStringLiteral("3D Fix");
     case 2:  return QStringLiteral("2D Fix");
@@ -39,95 +41,98 @@ QString VehicleStatusViewModel::gpsFixDescription() const
     }
 }
 
-void VehicleStatusViewModel::applyTelemetrySnapshot(TelemetrySnapshot snapshot)
+bool VehicleStatusViewModel::hasMovedEnough(double oldValue, double newValue)
 {
-    // Copy each field across, but only announce the ones that really
-    // changed. Most fields sit still between two snapshots, so most
-    // of these branches do nothing most of the time.
+    return qAbs(oldValue - newValue) > kSmallestChangeWorthTelling;
+}
 
-    if (m_flightModeName != snapshot.flightModeName) {
-        m_flightModeName = snapshot.flightModeName;
+void VehicleStatusViewModel::attachToActiveVehicle()
+{
+    if (!m_groundControlStation)
+        return;
+
+    MapVehicle *activeMapVehicle = m_groundControlStation->activeMapVehicle();
+    if (activeMapVehicle == m_mapVehicle)
+        return;
+
+    m_mapVehicle = activeMapVehicle;
+    refreshFromMapVehicle();
+}
+
+void VehicleStatusViewModel::refreshFromMapVehicle()
+{
+    if (!m_mapVehicle)
+        return;
+
+    if (m_flightModeName != m_mapVehicle->flightModeName()) {
+        m_flightModeName = m_mapVehicle->flightModeName();
         emit flightModeNameChanged();
     }
-    if (m_isArmed != snapshot.isArmed) {
-        m_isArmed = snapshot.isArmed;
+    if (m_isArmed != m_mapVehicle->isArmed()) {
+        m_isArmed = m_mapVehicle->isArmed();
         emit isArmedChanged();
     }
-    if (m_gpsFixType != snapshot.gpsFixType) {
-        m_gpsFixType = snapshot.gpsFixType;
+    if (m_gpsFixType != m_mapVehicle->gpsFixType()) {
+        m_gpsFixType = m_mapVehicle->gpsFixType();
         emit gpsFixDescriptionChanged();  // the words come from this number
     }
-    if (m_satelliteCount != snapshot.satelliteCount) {
-        m_satelliteCount = snapshot.satelliteCount;
+    if (m_satelliteCount != m_mapVehicle->satelliteCount()) {
+        m_satelliteCount = m_mapVehicle->satelliteCount();
         emit satelliteCountChanged();
     }
-    if (m_radioSignalPercent != snapshot.radioSignalPercent) {
-        m_radioSignalPercent = snapshot.radioSignalPercent;
+    if (m_radioSignalPercent != m_mapVehicle->radioSignalPercent()) {
+        m_radioSignalPercent = m_mapVehicle->radioSignalPercent();
         emit radioSignalPercentChanged();
     }
-    if (m_batteryPercent != snapshot.batteryPercent) {
-        m_batteryPercent = snapshot.batteryPercent;
+
+    const int chargePercent =
+        static_cast<int>(qRound(m_mapVehicle->lastConfirmedBattery().chargePercent()));
+    if (m_batteryPercent != chargePercent) {
+        m_batteryPercent = chargePercent;
         emit batteryPercentChanged();
     }
 
-    // Numbers with a decimal point are compared with a small window
-    // instead of an exact match. Two doubles almost never land on the
-    // same value twice, so an exact check would fire the signal every
-    // single time and defeat the whole point of checking.
-    const double smallestChangeWorthTelling = 0.01;
-
-    if (qAbs(m_altitudeMetersAboveHome - snapshot.altitudeMetersAboveHome) > smallestChangeWorthTelling) {
-        m_altitudeMetersAboveHome = snapshot.altitudeMetersAboveHome;
+    const VehiclePosition &position = m_mapVehicle->lastConfirmedPosition();
+    if (hasMovedEnough(m_altitudeMetersAboveHome, position.altitudeMetersAboveHome())) {
+        m_altitudeMetersAboveHome = position.altitudeMetersAboveHome();
         emit altitudeMetersAboveHomeChanged();
     }
-    if (qAbs(m_airspeedMetersPerSecond - snapshot.airspeedMetersPerSecond) > smallestChangeWorthTelling) {
-        m_airspeedMetersPerSecond = snapshot.airspeedMetersPerSecond;
+
+    if (hasMovedEnough(m_airspeedMetersPerSecond, m_mapVehicle->airspeedMetersPerSecond())) {
+        m_airspeedMetersPerSecond = m_mapVehicle->airspeedMetersPerSecond();
         emit airspeedMetersPerSecondChanged();
     }
-    if (qAbs(m_groundspeedMetersPerSecond - snapshot.groundspeedMetersPerSecond) > smallestChangeWorthTelling) {
-        m_groundspeedMetersPerSecond = snapshot.groundspeedMetersPerSecond;
-        emit groundspeedMetersPerSecondChanged();
-    }
-    if (qAbs(m_rollDegrees - snapshot.rollDegrees) > smallestChangeWorthTelling) {
-        m_rollDegrees = snapshot.rollDegrees;
+
+    const VehicleAttitude &attitude = m_mapVehicle->lastConfirmedAttitude();
+    if (hasMovedEnough(m_rollDegrees, attitude.rollDegrees())) {
+        m_rollDegrees = attitude.rollDegrees();
         emit rollDegreesChanged();
     }
-    if (qAbs(m_pitchDegrees - snapshot.pitchDegrees) > smallestChangeWorthTelling) {
-        m_pitchDegrees = snapshot.pitchDegrees;
+    if (hasMovedEnough(m_pitchDegrees, attitude.pitchDegrees())) {
+        m_pitchDegrees = attitude.pitchDegrees();
         emit pitchDegreesChanged();
     }
-    if (qAbs(m_headingDegrees - snapshot.headingDegrees) > smallestChangeWorthTelling) {
-        m_headingDegrees = snapshot.headingDegrees;
+    if (hasMovedEnough(m_headingDegrees, attitude.headingDegrees())) {
+        m_headingDegrees = attitude.headingDegrees();
         emit headingDegreesChanged();
     }
 
-    // Write down that a snapshot just landed. The once-a-second timer
-    // measures against this.
-    m_lastSnapshotArrivedAtMilliseconds = QDateTime::currentMSecsSinceEpoch();
-
-    if (m_isLinkStale) {
-        m_isLinkStale = false;
-        emit isLinkStaleChanged();
+    if (m_isOutOfContact != m_mapVehicle->isOutOfContact()) {
+        m_isOutOfContact = m_mapVehicle->isOutOfContact();
+        emit isOutOfContactChanged();
     }
+
+    refreshReportAge();
 }
 
-void VehicleStatusViewModel::updateLinkAgeAndStaleFlag()
+void VehicleStatusViewModel::refreshReportAge()
 {
-    if (m_lastSnapshotArrivedAtMilliseconds == 0)
-        return;  // nothing has ever arrived, so there is nothing to measure
+    if (!m_mapVehicle)
+        return;
 
-    const qint64 nowMilliseconds = QDateTime::currentMSecsSinceEpoch();
-    const int ageSeconds =
-        static_cast<int>((nowMilliseconds - m_lastSnapshotArrivedAtMilliseconds) / 1000);
-
-    if (m_secondsSinceLastSnapshot != ageSeconds) {
-        m_secondsSinceLastSnapshot = ageSeconds;
-        emit secondsSinceLastSnapshotChanged();
-    }
-
-    const bool linkLooksStale = ageSeconds >= kLinkStaleThresholdSeconds;
-    if (m_isLinkStale != linkLooksStale) {
-        m_isLinkStale = linkLooksStale;
-        emit isLinkStaleChanged();
+    const int ageSeconds = m_mapVehicle->secondsSinceLastReport();
+    if (m_secondsSinceLastReport != ageSeconds) {
+        m_secondsSinceLastReport = ageSeconds;
+        emit secondsSinceLastReportChanged();
     }
 }

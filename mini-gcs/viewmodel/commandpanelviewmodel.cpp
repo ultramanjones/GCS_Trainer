@@ -24,6 +24,22 @@ void CommandPanelViewModel::requestLaunch()         { sendCommandAndStartClock(Q
 void CommandPanelViewModel::requestReturnToLaunch() { sendCommandAndStartClock(QStringLiteral("Return")); }
 void CommandPanelViewModel::requestLand()           { sendCommandAndStartClock(QStringLiteral("Land")); }
 
+void CommandPanelViewModel::requestEmergencyStop()
+{
+    // Throw away whatever we were waiting on. There is no answer worth
+    // waiting for once the operator has decided to stop the motors.
+    m_acknowledgmentTimeoutTimer.stop();
+    setPendingCommandName(QString());
+
+    qWarning() << "CommandPanelViewModel::requestEmergencyStop: the operator cut the motors";
+
+    setLastCommandResultText(QStringLiteral("Motors cut by the operator"));
+    emit operatorMessageRaised(static_cast<int>(AlertSeverity::Critical),
+                               QStringLiteral("EMERGENCY STOP - motors cut"));
+
+    emit commandRequested(QStringLiteral("EmergencyStop"));
+}
+
 void CommandPanelViewModel::requestDropLink()
 {
     emit dropLinkRequested();

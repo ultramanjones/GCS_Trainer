@@ -40,7 +40,11 @@ private:
         TransitionToWing,
         WingBorneCircuit,
         ReturningHome,
-        Landing
+        Landing,
+
+        // The motors have been cut on purpose, in the air. This is not
+        // a flight mode. It is the aircraft falling.
+        MotorsCut
     };
 
     // Once it is flying on the wing, the aircraft goes around a
@@ -59,6 +63,7 @@ private:
     QString flightStageDisplayName() const;
     void advanceRacetrackCircuit(double stepSeconds);
     void advanceReturnToHome(double stepSeconds);
+    void advanceFallWithMotorsCut(double stepSeconds);
     void moveForward(double stepSeconds);
     void easeTowardTargetAttitude(double stepSeconds);
 
@@ -82,6 +87,14 @@ private:
 
     double m_airspeedMetersPerSecond = 0.0;
     double m_groundspeedMetersPerSecond = 0.0;
+
+    // True once the aircraft has hit the ground with the motors off.
+    // It stays true until somebody arms it again, so the flight mode
+    // reads "Crashed" instead of a tidy "Disarmed".
+    bool m_hasCrashed = false;
+
+    // How fast the aircraft is falling once the motors are off.
+    double m_fallSpeedMetersPerSecond = 0.0;
 
     double m_batteryPercent = 100.0;
     double m_secondsFlown = 0.0;
@@ -111,6 +124,10 @@ private:
     static constexpr double kTurnRadiusMeters = 110.0;
     static constexpr double kTurnBankDegrees = 22.0;
     static constexpr double kReturnBankDegrees = 8.0;
+
+    // Gravity, and how fast a tumbling airframe stops speeding up.
+    static constexpr double kGravityMetersPerSecondSquared = 9.81;
+    static constexpr double kTerminalFallSpeedMetersPerSecond = 26.0;
 
     // How fast the wings catch up to where they are supposed to be.
     // Bigger is snappier. Two and a half takes about a second and a

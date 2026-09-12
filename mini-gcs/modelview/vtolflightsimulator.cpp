@@ -22,6 +22,9 @@ VtolFlightSimulator::VtolFlightSimulator()
 
 QString VtolFlightSimulator::flightStageDisplayName() const
 {
+    if (m_flightStage == FlightStage::Disarmed && m_hasCrashed)
+        return QStringLiteral("Crashed");
+
     switch (m_flightStage) {
     case FlightStage::Disarmed:         return QStringLiteral("Disarmed");
     case FlightStage::ArmedOnGround:    return QStringLiteral("Armed");
@@ -30,6 +33,7 @@ QString VtolFlightSimulator::flightStageDisplayName() const
     case FlightStage::WingBorneCircuit: return QStringLiteral("Cruise");
     case FlightStage::ReturningHome:    return QStringLiteral("Return");
     case FlightStage::Landing:          return QStringLiteral("Land");
+    case FlightStage::MotorsCut:        return QStringLiteral("MOTORS CUT");
     }
     return QStringLiteral("Unknown");
 }
@@ -40,6 +44,10 @@ bool VtolFlightSimulator::tryToApplyCommand(const QString &commandName)
         if (m_flightStage != FlightStage::Disarmed)
             return false;
         m_flightStage = FlightStage::ArmedOnGround;
+
+        // Arming is what clears a crash. In a real program you would
+        // walk out and pick the aircraft up first.
+        m_hasCrashed = false;
         return true;
     }
 
@@ -65,6 +73,19 @@ bool VtolFlightSimulator::tryToApplyCommand(const QString &commandName)
         if (!isFlying)
             return false;
         m_flightStage = FlightStage::ReturningHome;
+        return true;
+    }
+
+    if (commandName == QLatin1String("EmergencyStop")) {
+        // This one is allowed whenever the motors are turning, in the
+        // air or on the ground. That is the whole point of it. It is
+        // never refused, because the moment you need it is exactly the
+        // moment a refusal would be unforgivable.
+        if (m_flightStage == FlightStage::Disarmed
+            || m_flightStage == FlightStage::MotorsCut)
+            return false;
+        m_flightStage = FlightStage::MotorsCut;
+        m_fallSpeedMetersPerSecond = 0.0;
         return true;
     }
 
@@ -173,6 +194,10 @@ void VtolFlightSimulator::advanceOneStep(double stepSeconds)
         advanceRacetrackCircuit(stepSeconds);
         break;
 
+    case FlightStage::MotorsCut:
+        advanceFallWithMotorsCut(stepSeconds);
+        break;
+
     case FlightStage::ReturningHome:
         advanceReturnToHome(stepSeconds);
         break;
@@ -200,9 +225,11 @@ void VtolFlightSimulator::advanceOneStep(double stepSeconds)
         || m_flightStage == FlightStage::TransitionToWing
         || m_flightStage == FlightStage::Landing) {
         m_batteryPercent -= 0.20 * stepSeconds;
-    } else if (m_flightStage != FlightStage::Disarmed) {
+    } else if (m_flightStage != FlightStage::Disarmed
+               && m_flightStage != FlightStage::MotorsCut) {
         m_batteryPercent -= 0.08 * stepSeconds;
     }
+    // Nothing drains while the motors are off. That is what off means.
     m_batteryPercent = qBound(0.0, m_batteryPercent, 100.0);
 }
 
@@ -325,12 +352,49 @@ void VtolFlightSimulator::advanceReturnToHome(double stepSeconds)
     moveForward(stepSeconds);
 }
 
+void VtolFlightSimulator::advanceFallWithMotorsCut(double stepSeconds)
+{
+    // No motors. No control. Just gravity and whatever speed it had.
+    //
+    // Falling speed builds at gravity until the airframe is tumbling
+    // hard enough to stop it building. Forward speed bleeds off with
+    // no thrust pushing it. The wings swing because nothing is holding
+    // them anywhere.
+    m_fallSpeedMetersPerSecond =
+        qMin(kTerminalFallSpeedMetersPerSecond,
+             m_fallSpeedMetersPerSecond + kGravityMetersPerSecondSquared * stepSeconds);
+
+    m_altitudeMetersAboveHome -= m_fallSpeedMetersPerSecond * stepSeconds;
+
+    m_groundspeedMetersPerSecond = qMax(0.0, m_groundspeedMetersPerSecond - 5.0 * stepSeconds);
+    m_airspeedMetersPerSecond = m_groundspeedMetersPerSecond;
+    moveForward(stepSeconds);
+
+    m_targetRollDegrees = 55.0 * qSin(m_secondsFlown * 2.4);
+    m_targetPitchDegrees = -38.0;
+
+    if (m_altitudeMetersAboveHome <= 0.0) {
+        m_altitudeMetersAboveHome = 0.0;
+        m_fallSpeedMetersPerSecond = 0.0;
+        m_groundspeedMetersPerSecond = 0.0;
+        m_airspeedMetersPerSecond = 0.0;
+        m_flightStage = FlightStage::Disarmed;
+
+        // It did not land. It fell. The flight mode says so until
+        // somebody arms it again.
+        m_hasCrashed = true;
+    }
+}
+
 TelemetrySnapshot VtolFlightSimulator::currentTelemetrySnapshot() const
 {
     TelemetrySnapshot snapshot;
 
     snapshot.flightModeName = flightStageDisplayName();
-    snapshot.isArmed = m_flightStage != FlightStage::Disarmed;
+    // Motors off means not armed, and the bar should say so the instant
+    // it happens, while the aircraft is still in the air falling.
+    snapshot.isArmed = m_flightStage != FlightStage::Disarmed
+                    && m_flightStage != FlightStage::MotorsCut;
 
     snapshot.gpsFixType = 3;
 

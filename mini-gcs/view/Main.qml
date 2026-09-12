@@ -11,14 +11,15 @@ ApplicationWindow {
     id: mainWindow
 
     width: 1280
-    height: 880
+    height: 900
     minimumWidth: 1000
 
-    // Tall enough that the command panel always fits without being
-    // cut off at the bottom. Work it out from the parts: the status
-    // bar, the message list, the smallest useful horizon, the command
-    // panel's own height, and the gaps between them.
-    minimumHeight: 780
+    // Tall enough that the command panel always fits without being cut
+    // off at the bottom. Add the parts up: 20 of margin, a 64 status
+    // bar, the smallest useful horizon at 190, the command panel's own
+    // height, a 110 message list, and 30 of gaps. Every time the
+    // command panel grows, this number has to grow with it.
+    minimumHeight: 820
 
     visible: true
     title: "Mini GCS - practice ground control station"

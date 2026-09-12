@@ -4,16 +4,17 @@ import QtQuick.Layouts
 // The strip across the top. Flight mode, armed state, GPS, radio,
 // battery, altitude, speed, and how old the newest reading is.
 //
-// The whole strip turns gray when the link goes quiet. A ground
-// station that keeps showing the last good battery number after the
-// radio died is lying to the operator.
+// The whole strip turns gray when the link goes quiet, so a stale
+// reading cannot be mistaken for a current one. This is crucial: an
+// operator acting on a battery number that is minutes old has no way
+// to know it is old.
 Rectangle {
     id: telemetryStatusBar
 
     radius: GcsTheme.panelCornerRadius
     border.width: 1
     border.color: GcsTheme.panelBorderColor
-    color: vehicleStatusViewModel.isLinkStale
+    color: vehicleStatusViewModel.isOutOfContact
            ? GcsTheme.panelStaleBackgroundColor
            : GcsTheme.panelBackgroundColor
 
@@ -98,8 +99,8 @@ Rectangle {
 
         StatusReadout {
             labelText: "LAST UPDATE"
-            valueText: vehicleStatusViewModel.secondsSinceLastSnapshot + " s ago"
-            valueColor: vehicleStatusViewModel.isLinkStale
+            valueText: vehicleStatusViewModel.secondsSinceLastReport + " s ago"
+            valueColor: vehicleStatusViewModel.isOutOfContact
                         ? GcsTheme.criticalStateColor
                         : GcsTheme.normalTextColor
         }

@@ -75,18 +75,18 @@ Rectangle {
             CommandButton {
                 text: "Arm"
                 accentColor: GcsTheme.criticalStateColor
-                onClicked: commandPanelViewModel.requestArm()
+                onClicked: vehicleCommandViewModel.requestArm()
             }
             CommandButton {
                 text: "Disarm"
-                onClicked: commandPanelViewModel.requestDisarm()
+                onClicked: vehicleCommandViewModel.requestDisarm()
             }
         }
 
         CommandButton {
             text: "Launch"
             accentColor: GcsTheme.goodStateColor
-            onClicked: commandPanelViewModel.requestLaunch()
+            onClicked: vehicleCommandViewModel.requestLaunch()
         }
 
         RowLayout {
@@ -95,11 +95,11 @@ Rectangle {
 
             CommandButton {
                 text: "Return"
-                onClicked: commandPanelViewModel.requestReturnToLaunch()
+                onClicked: vehicleCommandViewModel.requestReturnToHome()
             }
             CommandButton {
                 text: "Land"
-                onClicked: commandPanelViewModel.requestLand()
+                onClicked: vehicleCommandViewModel.requestLand()
             }
         }
 
@@ -123,24 +123,44 @@ Rectangle {
             CommandButton {
                 text: "Drop link"
                 accentColor: GcsTheme.warningStateColor
-                onClicked: commandPanelViewModel.requestDropLink()
+                onClicked: vehicleCommandViewModel.requestRadioUnplug()
             }
             CommandButton {
                 text: "Reconnect"
-                onClicked: commandPanelViewModel.requestReconnectLink()
+                onClicked: vehicleCommandViewModel.requestRadioReconnect()
             }
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 1
+            color: GcsTheme.panelBorderColor
+        }
+
+        Text {
+            text: "EMERGENCY"
+            color: GcsTheme.criticalStateColor
+            font.pixelSize: GcsTheme.smallLabelPixelSize
+            font.letterSpacing: 1
+        }
+
+        // Cutting the motors in the air is never refused by the
+        // vehicle, so the guard has to live in the control itself.
+        SlideToConfirm {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 44
+            labelText: "SLIDE TO CUT MOTORS"
+            onConfirmed: vehicleCommandViewModel.requestEmergencyStop()
         }
 
         // What happened to the last order. This is the whole point of
         // waiting for an answer instead of assuming one.
         Text {
             Layout.fillWidth: true
-            text: commandPanelViewModel.lastCommandResultText === ""
+            text: vehicleCommandViewModel.lastCommandResultText === ""
                   ? "No orders sent yet."
-                  : commandPanelViewModel.lastCommandResultText
-            color: commandPanelViewModel.isWaitingForAcknowledgment
-                   ? GcsTheme.warningStateColor
-                   : GcsTheme.normalTextColor
+                  : vehicleCommandViewModel.lastCommandResultText
+            color: GcsTheme.normalTextColor
             font.pixelSize: 13
             wrapMode: Text.WordWrap
         }

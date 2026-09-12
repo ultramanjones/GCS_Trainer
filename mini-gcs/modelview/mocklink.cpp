@@ -76,8 +76,17 @@ void MockLink::publishLatestSnapshot()
 
     if (snapshot.flightModeName != m_lastReportedFlightModeName) {
         m_lastReportedFlightModeName = snapshot.flightModeName;
-        reportVehicleMessage(AlertSeverity::Information,
-                      QStringLiteral("Flight mode is now %1").arg(snapshot.flightModeName));
+
+        // Most mode changes are routine. Losing the motors and hitting
+        // the ground are not, and they are logged at a level the
+        // operator cannot scroll past without noticing.
+        const bool isSeriousMode =
+            snapshot.flightModeName == QLatin1String("MOTORS CUT")
+         || snapshot.flightModeName == QLatin1String("Crashed");
+
+        reportVehicleMessage(isSeriousMode ? AlertSeverity::Critical
+                                           : AlertSeverity::Information,
+                             QStringLiteral("Flight mode is now %1").arg(snapshot.flightModeName));
     }
 
     if (!m_hasWarnedAboutLowBattery && snapshot.batteryPercent <= kLowBatteryWarningPercent) {

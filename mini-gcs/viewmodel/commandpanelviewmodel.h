@@ -37,6 +37,15 @@ public:
     Q_INVOKABLE void requestReturnToLaunch();
     Q_INVOKABLE void requestLand();
 
+    // Cut the motors, right now, wherever the aircraft is.
+    //
+    // This one does not wait its turn behind a pending order and it is
+    // never held back. Everything else in this class politely refuses
+    // to send while an earlier order is unanswered. The moment you
+    // need this one is exactly the moment that politeness would be
+    // unforgivable, so it cancels whatever is pending and goes.
+    Q_INVOKABLE void requestEmergencyStop();
+
     // These two do not go to the vehicle. They pull the radio plug
     // and put it back, so the stale-link behavior can be watched on
     // purpose.
