@@ -8,7 +8,10 @@ import QtQuick.Layouts
 // set up.
 ApplicationWindow {
     id: window
-    width: 640
+    // Six readouts in a row need the room. At 640 the last two ran
+    // off the edge.
+    width: 940
+    minimumWidth: 700
     height: 200
     visible: true
     title: "GCS Trainer — Lesson 1: Telemetry Bar"

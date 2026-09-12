@@ -15,3 +15,7 @@ qt_standard_project_setup(REQUIRES 6.5)
 # Each lesson is its own program, in its own subfolder, with its own
 # CMakeLists.txt. Add a new lesson by adding one line here.
 add_subdirectory(lesson-01-telemetry-bar)
+
+# The practice ground control station. One whole working program,
+# not a lesson. This is the thing to read and to show people.
+add_subdirectory(mini-gcs)
