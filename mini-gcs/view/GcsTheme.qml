@@ -25,7 +25,7 @@ QtObject {
     readonly property color groundColor: "#7a5230"
     readonly property color instrumentLineColor: "#f2f4f7"
 
-    readonly property color mapGridColor: "#26313d"
+    readonly property color mapGridColor: "#31404c"
     readonly property color mapTrailColor: "#4cc38a"
     readonly property color mapVehicleColor: "#ffd166"
     readonly property color mapHomeColor: "#5aa9e6"

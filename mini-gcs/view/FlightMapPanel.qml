@@ -7,6 +7,15 @@ import QtQuick.Controls
 //
 // This is drawn by hand instead of using a street map, so the program
 // needs no internet and no extra Qt modules to run.
+//
+// IMPORTANT, and the thing that broke this panel once already:
+// a Canvas paints on its own render thread by default. Paint code must
+// not reach out and call into a C++ object, because that object lives
+// on the main thread. So this panel copies everything it needs into
+// plain QML properties of its own, once per update, and the paint code
+// only ever reads those copies. The render strategy is also set to
+// Immediate, which keeps the painting on the main thread as a second
+// layer of safety.
 Rectangle {
     id: flightMapPanel
 
@@ -16,36 +25,61 @@ Rectangle {
     color: GcsTheme.panelBackgroundColor
     clip: true
 
+    // --- The copies the drawing reads. Nothing else. ---
+    property real vehicleEastMeters: 0
+    property real vehicleNorthMeters: 0
+    property real vehicleHeadingDegrees: 0
+    property var breadcrumbTrail: []
+
     // The view model counts up by one every time there is something
     // new to draw. Watching one number is cheaper than watching a
     // whole list.
     property int mapRevisionNumber: flightMapViewModel.mapRevisionNumber
-    onMapRevisionNumberChanged: flightMapCanvas.requestPaint()
+
+    onMapRevisionNumberChanged: {
+        vehicleEastMeters = flightMapViewModel.vehicleEastMetersFromHome
+        vehicleNorthMeters = flightMapViewModel.vehicleNorthMetersFromHome
+        vehicleHeadingDegrees = flightMapViewModel.vehicleHeadingDegrees
+        breadcrumbTrail = flightMapViewModel.breadcrumbTrailPoints()
+        flightMapCanvas.requestPaint()
+    }
 
     // How much ground fits on screen, measured from the middle of the
     // view out to an edge.
     readonly property real halfRangeMeters: 340
 
     // The middle of the view, in meters east and north of the launch
-    // point. It sits north of home because the practice circuit does.
-    readonly property real viewCenterEastMeters: 0
-    readonly property real viewCenterNorthMeters: 250
+    // point. It sits north of home because the practice pattern does.
+    // Centered on the racetrack the aircraft actually flies, so the
+    // whole pattern and the launch point are all on screen at once.
+    readonly property real viewCenterEastMeters: 110
+    readonly property real viewCenterNorthMeters: 155
 
     Canvas {
         id: flightMapCanvas
         anchors.fill: parent
 
+        // Paint on the main thread. See the note at the top of the file.
+        renderStrategy: Canvas.Immediate
+
+        // A canvas can be handed a size of zero on the very first pass,
+        // before the layout has settled. Ask for a repaint whenever the
+        // size lands, or the first drawing never happens.
+        Component.onCompleted: requestPaint()
+        onWidthChanged: requestPaint()
+        onHeightChanged: requestPaint()
+
         onPaint: {
             // HOW THE MAP IS DRAWN.
             //
-            // Everything the view model gives us is already in meters
-            // east and north of the launch point. So the only math
-            // here is turning meters into pixels.
+            // Everything here is already in meters east and north of
+            // the launch point. So the only math is turning meters
+            // into pixels.
             //
             // One meter is worth metersToPixels pixels. East grows to
             // the right, so screen x goes up with east. North grows
-            // upward on a map but screen y grows DOWNWARD, so screen
-            // y goes down when north goes up. That is the minus sign.
+            // upward on a map but screen y grows DOWNWARD, so screen y
+            // goes down when north goes up. That is the minus sign.
 
             var drawingContext = getContext("2d")
             drawingContext.reset()
@@ -55,19 +89,20 @@ Rectangle {
             if (canvasWidth <= 0 || canvasHeight <= 0)
                 return
 
+            var halfRange = flightMapPanel.halfRangeMeters
+            var centerEast = flightMapPanel.viewCenterEastMeters
+            var centerNorth = flightMapPanel.viewCenterNorthMeters
+
             drawingContext.fillStyle = GcsTheme.panelBackgroundColor
             drawingContext.fillRect(0, 0, canvasWidth, canvasHeight)
 
-            var metersToPixels = Math.min(canvasWidth, canvasHeight)
-                               / (2 * flightMapPanel.halfRangeMeters)
+            var metersToPixels = Math.min(canvasWidth, canvasHeight) / (2 * halfRange)
 
             function screenXForEastMeters(eastMeters) {
-                return canvasWidth / 2
-                     + (eastMeters - flightMapPanel.viewCenterEastMeters) * metersToPixels
+                return canvasWidth / 2 + (eastMeters - centerEast) * metersToPixels
             }
             function screenYForNorthMeters(northMeters) {
-                return canvasHeight / 2
-                     - (northMeters - flightMapPanel.viewCenterNorthMeters) * metersToPixels
+                return canvasHeight / 2 - (northMeters - centerNorth) * metersToPixels
             }
 
             // The grid. One line every hundred meters.
@@ -75,9 +110,13 @@ Rectangle {
             drawingContext.strokeStyle = GcsTheme.mapGridColor
             drawingContext.lineWidth = 1
 
-            var firstEast = Math.floor((flightMapPanel.viewCenterEastMeters - flightMapPanel.halfRangeMeters * 2) / gridStepMeters) * gridStepMeters
-            var lastEast = flightMapPanel.viewCenterEastMeters + flightMapPanel.halfRangeMeters * 2
-            for (var eastMeters = firstEast; eastMeters <= lastEast; eastMeters += gridStepMeters) {
+            var gridReach = halfRange * 2
+            var eastMeters
+            var northMeters
+
+            for (eastMeters = Math.floor((centerEast - gridReach) / gridStepMeters) * gridStepMeters;
+                 eastMeters <= centerEast + gridReach;
+                 eastMeters += gridStepMeters) {
                 var gridX = screenXForEastMeters(eastMeters)
                 drawingContext.beginPath()
                 drawingContext.moveTo(gridX, 0)
@@ -85,9 +124,9 @@ Rectangle {
                 drawingContext.stroke()
             }
 
-            var firstNorth = Math.floor((flightMapPanel.viewCenterNorthMeters - flightMapPanel.halfRangeMeters * 2) / gridStepMeters) * gridStepMeters
-            var lastNorth = flightMapPanel.viewCenterNorthMeters + flightMapPanel.halfRangeMeters * 2
-            for (var northMeters = firstNorth; northMeters <= lastNorth; northMeters += gridStepMeters) {
+            for (northMeters = Math.floor((centerNorth - gridReach) / gridStepMeters) * gridStepMeters;
+                 northMeters <= centerNorth + gridReach;
+                 northMeters += gridStepMeters) {
                 var gridY = screenYForNorthMeters(northMeters)
                 drawingContext.beginPath()
                 drawingContext.moveTo(0, gridY)
@@ -96,8 +135,8 @@ Rectangle {
             }
 
             // The trail of places the aircraft has already been.
-            var trailPoints = flightMapViewModel.breadcrumbTrailPoints()
-            if (trailPoints.length > 1) {
+            var trailPoints = flightMapPanel.breadcrumbTrail
+            if (trailPoints && trailPoints.length > 1) {
                 drawingContext.strokeStyle = GcsTheme.mapTrailColor
                 drawingContext.lineWidth = 2
                 drawingContext.beginPath()
@@ -118,25 +157,27 @@ Rectangle {
             drawingContext.strokeRect(homeX - 6, homeY - 6, 12, 12)
             drawingContext.fillStyle = GcsTheme.mapHomeColor
             drawingContext.font = "11px sans-serif"
-            drawingContext.fillText("HOME", homeX + 10, homeY + 4)
+            // Below and right of the square, clear of the aircraft
+            // symbol, which sits right on top of home when parked.
+            drawingContext.fillText("HOME", homeX + 12, homeY + 22)
 
-            // The aircraft, drawn as an arrowhead pointed the way it
-            // is flying. It is drawn pointing straight up and then
-            // turned by the heading, because a heading of zero means
-            // north, and north is up.
-            var vehicleX = screenXForEastMeters(flightMapViewModel.vehicleEastMetersFromHome)
-            var vehicleY = screenYForNorthMeters(flightMapViewModel.vehicleNorthMetersFromHome)
-            var headingRadians = flightMapViewModel.vehicleHeadingDegrees * Math.PI / 180
+            // The aircraft, drawn as an arrowhead pointed the way it is
+            // flying. It is drawn pointing straight up and then turned
+            // by the heading, because a heading of zero means north,
+            // and north is up.
+            var vehicleX = screenXForEastMeters(flightMapPanel.vehicleEastMeters)
+            var vehicleY = screenYForNorthMeters(flightMapPanel.vehicleNorthMeters)
+            var headingRadians = flightMapPanel.vehicleHeadingDegrees * Math.PI / 180
 
             drawingContext.save()
             drawingContext.translate(vehicleX, vehicleY)
             drawingContext.rotate(headingRadians)
             drawingContext.fillStyle = GcsTheme.mapVehicleColor
             drawingContext.beginPath()
-            drawingContext.moveTo(0, -13)
-            drawingContext.lineTo(9, 10)
+            drawingContext.moveTo(0, -14)
+            drawingContext.lineTo(10, 11)
             drawingContext.lineTo(0, 5)
-            drawingContext.lineTo(-9, 10)
+            drawingContext.lineTo(-10, 11)
             drawingContext.closePath()
             drawingContext.fill()
             drawingContext.restore()
@@ -184,7 +225,11 @@ Rectangle {
         width: 110
         height: 30
         text: "Clear trail"
-        onClicked: flightMapViewModel.clearBreadcrumbTrail()
+        onClicked: {
+            flightMapViewModel.clearBreadcrumbTrail()
+            flightMapPanel.breadcrumbTrail = []
+            flightMapCanvas.requestPaint()
+        }
 
         background: Rectangle {
             radius: 4

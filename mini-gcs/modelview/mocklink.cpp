@@ -2,8 +2,6 @@
 
 #include <QDebug>
 
-#include "model/vehiclealert.h"
-
 namespace {
 // 50 times a second. Twenty milliseconds between steps.
 constexpr int kAircraftStepMilliseconds = 20;
@@ -55,10 +53,13 @@ void MockLink::sendCommand(const QString &commandName)
         qWarning() << "MockLink::sendCommand: the vehicle refused"
                    << commandName << "- it does not make sense in flight mode"
                    << m_vtolFlightSimulator.currentTelemetrySnapshot().flightModeName;
-        reportVehicleMessage(AlertSeverity::Warning,
-                      QStringLiteral("%1 refused").arg(commandName));
     }
 
+    // The refusal is NOT announced here. This object reports what the
+    // link and the vehicle do on their own. What happened to an order
+    // the operator gave is the command panel's story to tell, and it
+    // tells it when this answer arrives. Saying it in both places put
+    // the same refusal in the message list twice.
     emit commandAcknowledged(commandName, wasAccepted);
 }
 

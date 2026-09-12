@@ -2,6 +2,20 @@
 
 #include <QtMath>
 
+namespace {
+
+// Keeps an angle in the range zero up to three hundred sixty.
+double wrappedHeadingDegrees(double headingDegrees)
+{
+    while (headingDegrees < 0.0)
+        headingDegrees += 360.0;
+    while (headingDegrees >= 360.0)
+        headingDegrees -= 360.0;
+    return headingDegrees;
+}
+
+}  // namespace
+
 VtolFlightSimulator::VtolFlightSimulator()
 {
 }
@@ -68,6 +82,37 @@ bool VtolFlightSimulator::tryToApplyCommand(const QString &commandName)
     return false;
 }
 
+void VtolFlightSimulator::moveForward(double stepSeconds)
+{
+    // Take one step in whatever direction the nose is pointing.
+    //
+    // A heading of zero means north, and north is the positive north
+    // axis. A heading of ninety means east. That is why east uses the
+    // sine and north uses the cosine, which is the opposite of the way
+    // angles are usually written in a math class.
+    const double headingRadians = qDegreesToRadians(m_headingDegrees);
+    const double stepMeters = m_groundspeedMetersPerSecond * stepSeconds;
+
+    m_eastMetersFromHome += qSin(headingRadians) * stepMeters;
+    m_northMetersFromHome += qCos(headingRadians) * stepMeters;
+}
+
+void VtolFlightSimulator::easeTowardTargetAttitude(double stepSeconds)
+{
+    // Move the wings part of the way toward where they are supposed to
+    // be, every step, instead of snapping straight there.
+    //
+    // The fraction moved each step is the ease rate times the step
+    // length. It is held at one so a long step can never overshoot and
+    // start swinging. This is the same one-line smoothing every flight
+    // instrument uses, and it is what makes a roll-in look like a
+    // roll-in instead of a jump cut.
+    const double fractionOfTheWay = qMin(1.0, kAttitudeEaseRatePerSecond * stepSeconds);
+
+    m_rollDegrees += (m_targetRollDegrees - m_rollDegrees) * fractionOfTheWay;
+    m_pitchDegrees += (m_targetPitchDegrees - m_pitchDegrees) * fractionOfTheWay;
+}
+
 void VtolFlightSimulator::advanceOneStep(double stepSeconds)
 {
     if (m_flightStage != FlightStage::Disarmed)
@@ -79,18 +124,19 @@ void VtolFlightSimulator::advanceOneStep(double stepSeconds)
     case FlightStage::ArmedOnGround:
         m_airspeedMetersPerSecond = 0.0;
         m_groundspeedMetersPerSecond = 0.0;
-        m_rollDegrees = 0.0;
-        m_pitchDegrees = 0.0;
+        m_targetRollDegrees = 0.0;
+        m_targetPitchDegrees = 0.0;
         break;
 
     case FlightStage::HoverClimb:
         // Straight up, nose level, no forward speed. A tail-sitter
-        // hovering looks like a helicopter to the numbers.
+        // hovering looks like a helicopter to the numbers. It rocks a
+        // little, the way a hovering aircraft holding position does.
         m_altitudeMetersAboveHome += kClimbRateMetersPerSecond * stepSeconds;
         m_airspeedMetersPerSecond = 0.0;
         m_groundspeedMetersPerSecond = 0.0;
-        m_rollDegrees = 0.0;
-        m_pitchDegrees = 0.0;
+        m_targetRollDegrees = 3.0 * qSin(m_secondsFlown * 0.9);
+        m_targetPitchDegrees = 2.0 * qSin(m_secondsFlown * 0.6);
         if (m_altitudeMetersAboveHome >= kCruiseAltitudeMeters) {
             m_altitudeMetersAboveHome = kCruiseAltitudeMeters;
             m_flightStage = FlightStage::TransitionToWing;
@@ -99,34 +145,32 @@ void VtolFlightSimulator::advanceOneStep(double stepSeconds)
         break;
 
     case FlightStage::TransitionToWing: {
-        // Tipping over. Speed builds up from nothing to cruise speed
-        // over a few seconds, and the nose drops while it happens.
+        // Tipping over. Speed builds from nothing to cruise speed over
+        // a few seconds, and the nose drops while it happens.
         m_transitionSecondsElapsed += stepSeconds;
         const double howFarAlong =
             qBound(0.0, m_transitionSecondsElapsed / kTransitionSeconds, 1.0);
+
         m_airspeedMetersPerSecond = kCruiseSpeedMetersPerSecond * howFarAlong;
         m_groundspeedMetersPerSecond = m_airspeedMetersPerSecond;
-        m_pitchDegrees = -10.0 * howFarAlong;
-        m_rollDegrees = 0.0;
+        m_targetPitchDegrees = -11.0 * howFarAlong;
+        m_targetRollDegrees = 0.0;
 
-        // Creep forward along the current heading while tipping over.
-        const double headingRadians = qDegreesToRadians(m_headingDegrees);
-        m_eastMetersFromHome += qSin(headingRadians) * m_groundspeedMetersPerSecond * stepSeconds;
-        m_northMetersFromHome += qCos(headingRadians) * m_groundspeedMetersPerSecond * stepSeconds;
+        moveForward(stepSeconds);
 
         if (m_transitionSecondsElapsed >= kTransitionSeconds) {
+            // Carry straight on into the first leg of the racetrack
+            // from exactly where we are. Nothing jumps.
             m_flightStage = FlightStage::WingBorneCircuit;
-
-            // Work out where we are on the circle from where we are
-            // standing, so the switch to the circuit does not jump.
-            m_circuitAngleRadians = qAtan2(m_eastMetersFromHome,
-                                           m_northMetersFromHome - kCircuitRadiusMeters);
+            m_circuitLeg = CircuitLeg::OutboundStraight;
+            m_metersFlownOnLeg = 0.0;
+            m_degreesTurnedOnLeg = 0.0;
         }
         break;
     }
 
     case FlightStage::WingBorneCircuit:
-        advanceWingBorneCircuit(stepSeconds);
+        advanceRacetrackCircuit(stepSeconds);
         break;
 
     case FlightStage::ReturningHome:
@@ -137,8 +181,8 @@ void VtolFlightSimulator::advanceOneStep(double stepSeconds)
         // Straight down, wherever we are.
         m_airspeedMetersPerSecond = 0.0;
         m_groundspeedMetersPerSecond = 0.0;
-        m_rollDegrees = 0.0;
-        m_pitchDegrees = 0.0;
+        m_targetRollDegrees = 0.0;
+        m_targetPitchDegrees = 0.0;
         m_altitudeMetersAboveHome -= kDescentRateMetersPerSecond * stepSeconds;
         if (m_altitudeMetersAboveHome <= 0.0) {
             m_altitudeMetersAboveHome = 0.0;
@@ -147,52 +191,89 @@ void VtolFlightSimulator::advanceOneStep(double stepSeconds)
         break;
     }
 
-    // Battery drains faster when the motors are working harder.
+    easeTowardTargetAttitude(stepSeconds);
+
+    // Battery drains faster when the motors are holding the whole
+    // aircraft up. Hovering costs far more than flying on the wing,
+    // which is the entire reason a tail-sitter tips over at all.
     if (m_flightStage == FlightStage::HoverClimb
         || m_flightStage == FlightStage::TransitionToWing
         || m_flightStage == FlightStage::Landing) {
-        m_batteryPercent -= 0.06 * stepSeconds;
+        m_batteryPercent -= 0.20 * stepSeconds;
     } else if (m_flightStage != FlightStage::Disarmed) {
-        m_batteryPercent -= 0.02 * stepSeconds;
+        m_batteryPercent -= 0.08 * stepSeconds;
     }
     m_batteryPercent = qBound(0.0, m_batteryPercent, 100.0);
 }
 
-void VtolFlightSimulator::advanceWingBorneCircuit(double stepSeconds)
+void VtolFlightSimulator::advanceRacetrackCircuit(double stepSeconds)
 {
-    // Fly a big circle. The circle sits one radius north of the
-    // launch point, so the aircraft starts the circuit right where it
-    // took off instead of jumping across the map.
+    // THE RACETRACK, spelled out.
     //
-    // The math, spelled out:
-    //   How fast we go around a circle is speed divided by radius.
-    //   That gives radians per second. Multiply by the time step and
-    //   you get how far around we moved this tick.
-    //   Position on the circle is then the center plus radius times
-    //   the sine and cosine of the angle.
-    //   Heading is the direction of travel, which on a circle is the
-    //   angle plus ninety degrees.
-    const double radiansPerSecond = kCruiseSpeedMetersPerSecond / kCircuitRadiusMeters;
-    m_circuitAngleRadians += radiansPerSecond * stepSeconds;
-
-    m_eastMetersFromHome = kCircuitRadiusMeters * qSin(m_circuitAngleRadians);
-    m_northMetersFromHome = kCircuitRadiusMeters
-                          + kCircuitRadiusMeters * qCos(m_circuitAngleRadians);
-
-    m_headingDegrees = qRadiansToDegrees(m_circuitAngleRadians) + 90.0;
-    while (m_headingDegrees < 0.0)
-        m_headingDegrees += 360.0;
-    while (m_headingDegrees >= 360.0)
-        m_headingDegrees -= 360.0;
+    // Four legs, forever: a straight, a turn all the way around, the
+    // straight back the other way, and a turn back to the start.
+    //
+    // On a straight leg the heading is left alone and we count meters
+    // until the leg is long enough.
+    //
+    // In a turn the heading changes a little every step. How fast it
+    // changes comes from one fact: an aircraft flying a circle turns
+    // through its whole circle in the time it takes to fly around the
+    // edge. So turn rate in radians per second is speed divided by the
+    // radius of the turn. We add that to the heading each step and
+    // count the degrees until we have come around a hundred and
+    // eighty. Moving forward along the new heading each step traces
+    // the curve on its own, with no circle math anywhere.
+    //
+    // Rolling is the part that matters on the instrument. A straight
+    // leg asks for wings level with a slow easy wander. A turn asks
+    // for a real bank. The easing function does the rest, so the
+    // horizon rolls in at the top of each turn and rolls out at the
+    // bottom.
 
     m_airspeedMetersPerSecond = kCruiseSpeedMetersPerSecond;
     m_groundspeedMetersPerSecond = kCruiseSpeedMetersPerSecond;
-
-    // Banked over into the turn, nose a touch high.
-    m_rollDegrees = 18.0;
-    m_pitchDegrees = 2.0;
-
     m_altitudeMetersAboveHome = kCruiseAltitudeMeters;
+
+    // A touch of nose-up trim that breathes, so the instrument is
+    // never perfectly still. Real aircraft never are.
+    m_targetPitchDegrees = 1.5 + 1.2 * qSin(m_secondsFlown * 0.7);
+
+    const bool isTurning = m_circuitLeg == CircuitLeg::FirstTurn
+                        || m_circuitLeg == CircuitLeg::SecondTurn;
+
+    if (isTurning) {
+        const double turnRateDegreesPerSecond =
+            qRadiansToDegrees(kCruiseSpeedMetersPerSecond / kTurnRadiusMeters);
+        const double degreesThisStep = turnRateDegreesPerSecond * stepSeconds;
+
+        m_headingDegrees = wrappedHeadingDegrees(m_headingDegrees + degreesThisStep);
+        m_degreesTurnedOnLeg += degreesThisStep;
+
+        m_targetRollDegrees = kTurnBankDegrees;
+
+        if (m_degreesTurnedOnLeg >= 180.0) {
+            m_circuitLeg = (m_circuitLeg == CircuitLeg::FirstTurn)
+                         ? CircuitLeg::InboundStraight
+                         : CircuitLeg::OutboundStraight;
+            m_metersFlownOnLeg = 0.0;
+            m_degreesTurnedOnLeg = 0.0;
+        }
+    } else {
+        m_targetRollDegrees = 2.0 * qSin(m_secondsFlown * 0.45);
+
+        m_metersFlownOnLeg += kCruiseSpeedMetersPerSecond * stepSeconds;
+
+        if (m_metersFlownOnLeg >= kStraightLegMeters) {
+            m_circuitLeg = (m_circuitLeg == CircuitLeg::OutboundStraight)
+                         ? CircuitLeg::FirstTurn
+                         : CircuitLeg::SecondTurn;
+            m_metersFlownOnLeg = 0.0;
+            m_degreesTurnedOnLeg = 0.0;
+        }
+    }
+
+    moveForward(stepSeconds);
 }
 
 void VtolFlightSimulator::advanceReturnToHome(double stepSeconds)
@@ -208,18 +289,40 @@ void VtolFlightSimulator::advanceReturnToHome(double stepSeconds)
         return;
     }
 
-    m_headingDegrees = qRadiansToDegrees(qAtan2(eastToGo, northToGo));
-    while (m_headingDegrees < 0.0)
-        m_headingDegrees += 360.0;
-
     m_airspeedMetersPerSecond = kCruiseSpeedMetersPerSecond;
     m_groundspeedMetersPerSecond = kCruiseSpeedMetersPerSecond;
-    m_rollDegrees = 6.0;
-    m_pitchDegrees = 1.0;
+    m_altitudeMetersAboveHome = kCruiseAltitudeMeters;
+    m_targetPitchDegrees = 1.0;
 
-    const double stepMeters = kCruiseSpeedMetersPerSecond * stepSeconds;
-    m_eastMetersFromHome += (eastToGo / distanceMeters) * stepMeters;
-    m_northMetersFromHome += (northToGo / distanceMeters) * stepMeters;
+    // Turn toward home instead of snapping the nose around. Work out
+    // the heading we want, then how far off we are, kept in the range
+    // minus a hundred eighty to plus a hundred eighty so the aircraft
+    // always turns the short way around. Bank into whichever side the
+    // turn is on, and stop banking once we are lined up.
+    const double wantedHeadingDegrees =
+        wrappedHeadingDegrees(qRadiansToDegrees(qAtan2(eastToGo, northToGo)));
+
+    double headingErrorDegrees = wantedHeadingDegrees - m_headingDegrees;
+    while (headingErrorDegrees > 180.0)
+        headingErrorDegrees -= 360.0;
+    while (headingErrorDegrees < -180.0)
+        headingErrorDegrees += 360.0;
+
+    const double turnRateDegreesPerSecond =
+        qRadiansToDegrees(kCruiseSpeedMetersPerSecond / kTurnRadiusMeters);
+    const double mostWeCanTurnThisStep = turnRateDegreesPerSecond * stepSeconds;
+    const double turnThisStep =
+        qBound(-mostWeCanTurnThisStep, headingErrorDegrees, mostWeCanTurnThisStep);
+
+    m_headingDegrees = wrappedHeadingDegrees(m_headingDegrees + turnThisStep);
+
+    if (qAbs(headingErrorDegrees) < 2.0)
+        m_targetRollDegrees = 0.0;
+    else
+        m_targetRollDegrees = (headingErrorDegrees > 0.0) ? kReturnBankDegrees
+                                                          : -kReturnBankDegrees;
+
+    moveForward(stepSeconds);
 }
 
 TelemetrySnapshot VtolFlightSimulator::currentTelemetrySnapshot() const
@@ -234,8 +337,7 @@ TelemetrySnapshot VtolFlightSimulator::currentTelemetrySnapshot() const
     // Satellite count wanders a little so the screen looks alive.
     snapshot.satelliteCount = 11 + static_cast<int>(qFloor(2.0 * qAbs(qSin(m_secondsFlown / 7.0))));
 
-    // Radio gets weaker the farther away the aircraft is. Twelve
-    // hundred meters out is where it reaches zero.
+    // Radio gets weaker the farther away the aircraft is.
     const double distanceMeters = qSqrt(m_eastMetersFromHome * m_eastMetersFromHome
                                       + m_northMetersFromHome * m_northMetersFromHome);
     snapshot.radioSignalPercent =
@@ -251,10 +353,10 @@ TelemetrySnapshot VtolFlightSimulator::currentTelemetrySnapshot() const
     //
     // One degree of latitude is about 111320 meters everywhere. One
     // degree of longitude is that same number shrunk by the cosine of
-    // the latitude, because the lines of longitude squeeze together
-    // as you go north. This is the flat-earth shortcut. It is wrong
-    // over hundreds of miles and exact enough over a few thousand
-    // feet, which is all this practice vehicle ever flies.
+    // the latitude, because the lines of longitude squeeze together as
+    // you go north. This is the flat-earth shortcut. It is wrong over
+    // hundreds of miles and exact enough over a few thousand feet,
+    // which is all this practice vehicle ever flies.
     const double metersPerDegreeLatitude = 111320.0;
     const double metersPerDegreeLongitude =
         metersPerDegreeLatitude * qCos(qDegreesToRadians(kHomeLatitudeDegrees));

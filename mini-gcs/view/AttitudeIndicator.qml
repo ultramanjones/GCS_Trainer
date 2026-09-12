@@ -44,6 +44,13 @@ Rectangle {
         anchors.bottom: headingReadout.top
         anchors.margins: 8
 
+        // Same rule as the map panel: paint on the main thread, so this
+        // code can safely read anything it needs.
+        renderStrategy: Canvas.Immediate
+        Component.onCompleted: requestPaint()
+        onWidthChanged: requestPaint()
+        onHeightChanged: requestPaint()
+
         onPaint: {
             // HOW THIS DRAWING WORKS, step by step.
             //

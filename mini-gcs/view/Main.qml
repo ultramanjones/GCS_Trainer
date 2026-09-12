@@ -40,14 +40,35 @@ ApplicationWindow {
             Layout.fillHeight: true
             spacing: 10
 
+            // The map takes all the room left over, and it has to ASK
+            // for a real width to get it.
+            //
+            // This one cost an evening. A layout hands out leftover
+            // space in proportion to what each item asked for. A plain
+            // Rectangle asks for zero. Zero against the instrument
+            // column's 330 means the column takes everything, and this
+            // panel came out three pixels wide. It was drawing the
+            // whole time, into a sliver nobody could see.
+            //
+            // Layout.fillWidth does not fix that on its own. All it
+            // does is make an item eligible for a share. The preferred
+            // width is what decides how big the share is.
             FlightMapPanel {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                Layout.preferredWidth: 900
+                Layout.minimumWidth: 420
             }
 
+            // The instrument column is a side panel of one fixed width,
+            // the way a real ground station lays one out. It never
+            // grows, so the map gets every pixel the window gains.
             ColumnLayout {
-                Layout.preferredWidth: 330
+                Layout.fillWidth: false
                 Layout.fillHeight: true
+                Layout.preferredWidth: 330
+                Layout.minimumWidth: 330
+                Layout.maximumWidth: 330
                 spacing: 10
 
                 // The horizon is the flexible one. It is a circle, so it

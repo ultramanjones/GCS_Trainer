@@ -43,19 +43,42 @@ private:
         Landing
     };
 
+    // Once it is flying on the wing, the aircraft goes around a
+    // racetrack: up one side, turn around, down the other side, turn
+    // around again. Real aircraft fly patterns like this, and it means
+    // the wings roll into a turn and level out again instead of
+    // sitting at one fixed angle forever.
+    enum class CircuitLeg
+    {
+        OutboundStraight,
+        FirstTurn,
+        InboundStraight,
+        SecondTurn
+    };
+
     QString flightStageDisplayName() const;
-    void advanceWingBorneCircuit(double stepSeconds);
+    void advanceRacetrackCircuit(double stepSeconds);
     void advanceReturnToHome(double stepSeconds);
+    void moveForward(double stepSeconds);
+    void easeTowardTargetAttitude(double stepSeconds);
 
     FlightStage m_flightStage = FlightStage::Disarmed;
+    CircuitLeg m_circuitLeg = CircuitLeg::OutboundStraight;
 
     double m_eastMetersFromHome = 0.0;
     double m_northMetersFromHome = 0.0;
     double m_altitudeMetersAboveHome = 0.0;
 
     double m_headingDegrees = 0.0;
+
+    // Where the wings are right now, and where they are heading.
+    // Nothing snaps. Every stage sets a target and one function eases
+    // the real value toward it, so the instrument always moves the way
+    // an aircraft moves.
     double m_rollDegrees = 0.0;
     double m_pitchDegrees = 0.0;
+    double m_targetRollDegrees = 0.0;
+    double m_targetPitchDegrees = 0.0;
 
     double m_airspeedMetersPerSecond = 0.0;
     double m_groundspeedMetersPerSecond = 0.0;
@@ -63,8 +86,12 @@ private:
     double m_batteryPercent = 100.0;
     double m_secondsFlown = 0.0;
 
-    // Where we are around the circle, in radians.
-    double m_circuitAngleRadians = 0.0;
+    // How far along the current straight leg, in meters.
+    double m_metersFlownOnLeg = 0.0;
+
+    // How far around the current turn, in degrees. A turn is finished
+    // at a hundred and eighty.
+    double m_degreesTurnedOnLeg = 0.0;
 
     // How long we have been tipping over from hover to wing flight.
     double m_transitionSecondsElapsed = 0.0;
@@ -75,9 +102,18 @@ private:
     static constexpr double kHomeLongitudeDegrees = -79.8556;
 
     static constexpr double kCruiseAltitudeMeters = 40.0;
-    static constexpr double kCircuitRadiusMeters = 250.0;
-    static constexpr double kCruiseSpeedMetersPerSecond = 22.0;
+    static constexpr double kCruiseSpeedMetersPerSecond = 26.0;
     static constexpr double kClimbRateMetersPerSecond = 3.0;
     static constexpr double kDescentRateMetersPerSecond = 2.0;
     static constexpr double kTransitionSeconds = 4.0;
+
+    static constexpr double kStraightLegMeters = 220.0;
+    static constexpr double kTurnRadiusMeters = 110.0;
+    static constexpr double kTurnBankDegrees = 22.0;
+    static constexpr double kReturnBankDegrees = 8.0;
+
+    // How fast the wings catch up to where they are supposed to be.
+    // Bigger is snappier. Two and a half takes about a second and a
+    // half to settle, which is what a real roll-in looks like.
+    static constexpr double kAttitudeEaseRatePerSecond = 2.5;
 };
