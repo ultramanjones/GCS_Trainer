@@ -99,6 +99,7 @@ private:
         double       homeLatitudeDegrees = 0.0;
         double       homeLongitudeDegrees = 0.0;
         bool         hasBeenAskedToStream = false;
+        quint8       autopilotType = 0;
         quint8       lastSequenceNumber = 0;
         bool         hasSeenAnySequence = false;
     };
@@ -118,6 +119,10 @@ private:
                               quint16 toPort);
 
     void sendGroundHeartbeat();
+
+    // Packs a CommandLong and puts it on the wire to one vehicle.
+    void sendCommandLong(const MavlinkMessage::CommandLong &command,
+                         const VehicleRecord &record);
 
     void drainReceiveBuffer(const QHostAddress &fromAddress, quint16 fromPort);
 
@@ -151,11 +156,15 @@ private:
     // the order that caused it. Keyed by MAV_CMD number.
     QHash<quint16, VehicleCommandRequest> m_commandsAwaitingAnswer;
 
+    // A launch order that is waiting on a mode change first. Keyed by
+    // vehicle. See sendVehicleCommand for why launching takes two
+    // steps against ArduPilot.
+    QHash<int, VehicleCommandRequest> m_launchesAwaitingGuidedMode;
+
     QTimer m_publishTimer;
     QTimer m_watchdogTimer;
     QTimer m_heartbeatTimer;
 
-    qint64 m_totalBytesReceived = 0;
     int m_badFrameCount = 0;
     int m_framesReceivedCount = 0;
 

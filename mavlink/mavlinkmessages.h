@@ -48,6 +48,17 @@ inline constexpr quint16 kCommandTakeoff        = 22;
 inline constexpr quint16 kCommandReturnToLaunch = 20;
 inline constexpr quint16 kCommandLand           = 21;
 inline constexpr quint16 kCommandFlightTermination = 185;
+inline constexpr quint16 kCommandDoSetMode         = 176;
+
+// ArduCopter's number for Guided mode. The autopilot flies and the
+// ground station tells it where to go. A takeoff order is only obeyed
+// in this mode, because in the pilot modes a person has the sticks.
+inline constexpr quint32 kArduCopterModeGuided = 4;
+
+// Goes in parameter one of DO_SET_MODE. It says "the number in
+// parameter two is this autopilot's own mode number, not a standard
+// one".
+inline constexpr quint8 kBaseModeCustomModeEnabled = 1;
 
 // Answers a vehicle can give, from the MAV_RESULT list.
 inline constexpr quint8 kResultAccepted            = 0;

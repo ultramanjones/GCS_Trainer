@@ -163,7 +163,6 @@ void MavlinkRadioLink::readPendingDatagrams()
     // this loops until the socket is empty.
     while (m_socket && m_socket->hasPendingDatagrams()) {
         const QNetworkDatagram datagram = m_socket->receiveDatagram();
-        m_totalBytesReceived += datagram.data().size();
         m_receiveBuffer.append(datagram.data());
 
         // One datagram can hold several frames, and a frame can be split
@@ -181,9 +180,7 @@ void MavlinkRadioLink::readPendingStreamBytes()
     if (!m_streamSocket)
         return;
 
-    const QByteArray arrived = m_streamSocket->readAll();
-    m_totalBytesReceived += arrived.size();
-    m_receiveBuffer.append(arrived);
+    m_receiveBuffer.append(m_streamSocket->readAll());
     drainReceiveBuffer(m_streamSocket->peerAddress(), quint16(m_streamSocket->peerPort()));
 }
 
@@ -229,27 +226,6 @@ void MavlinkRadioLink::requestTelemetryFrom(quint8 targetSystem,
 // once it has heard a version 2 frame from us - this is that frame.
 void MavlinkRadioLink::sendGroundHeartbeat()
 {
-    // Temporary. Says once a second what the link is actually doing,
-    // so a silent screen can be told apart from a dead socket.
-    if (m_transport == Transport::TcpConnect) {
-        qInfo("LINK tcp state=%d bytesIn=%lld frames=%d bad=%d buffer=%lld vehicles=%d",
-              m_streamSocket ? int(m_streamSocket->state()) : -1,
-              m_totalBytesReceived, m_framesReceivedCount, m_badFrameCount,
-              qint64(m_receiveBuffer.size()), m_vehicleRecords.size());
-        for (auto it = m_vehicleRecords.cbegin(); it != m_vehicleRecords.cend(); ++it) {
-            qInfo("  veh %d mode=%s armed=%d sats=%d fix=%d batt=%.0f alt=%.1f lost=%d",
-                  it.key(), qPrintable(it->sitRep.flightModeName),
-                  int(it->sitRep.isArmed), it->sitRep.satelliteCount,
-                  it->sitRep.gpsFixType, it->sitRep.battery.chargePercent(),
-                  it->sitRep.position.altitudeMetersAboveHome(),
-                  int(it->hasBeenReportedLost));
-        }
-    } else {
-        qInfo("LINK udp bytesIn=%lld frames=%d bad=%d vehicles=%d",
-              m_totalBytesReceived, m_framesReceivedCount, m_badFrameCount,
-              m_vehicleRecords.size());
-    }
-
     Heartbeat beat;
     beat.vehicleType    = 6;    // MAV_TYPE_GCS
     beat.autopilotType  = 8;    // MAV_AUTOPILOT_INVALID, what a GCS sends
@@ -364,6 +340,7 @@ void MavlinkRadioLink::handleFrame(const MavlinkFrame &frame,
                 : flightModeName(message.customMode);
 
         record.sitRep.isArmed = (message.baseMode & Heartbeat::kArmedFlag) != 0;
+        record.autopilotType = message.autopilotType;
 
         // First heartbeat from this vehicle. Ask it to start sending
         // telemetry. A real autopilot says nothing but heartbeats
@@ -460,6 +437,36 @@ void MavlinkRadioLink::handleFrame(const MavlinkFrame &frame,
 
     case kCommandAck: {
         const CommandAck message = CommandAck::unpack(frame.payloadBytes);
+
+        // The answer to the mode change that comes before a launch.
+        // Accepted means send the takeoff now. Refused means the
+        // launch is over before it started, and the operator hears
+        // about it once.
+        if (message.commandNumber == kCommandDoSetMode
+            && m_launchesAwaitingGuidedMode.contains(vehicleIdentifier)) {
+
+            const VehicleCommandRequest launchRequest =
+                m_launchesAwaitingGuidedMode.take(vehicleIdentifier);
+
+            if (message.result == kResultAccepted) {
+                CommandLong takeoff;
+                buildCommandLong(launchRequest.commandName,
+                                 quint8(launchRequest.vehicleIdentifier), takeoff);
+                m_commandsAwaitingAnswer.insert(takeoff.commandNumber, launchRequest);
+                sendCommandLong(takeoff, record);
+            } else {
+                VehicleCommandAcknowledgment refusal;
+                refusal.vehicleIdentifier = launchRequest.vehicleIdentifier;
+                refusal.requestIdentifier = launchRequest.requestIdentifier;
+                refusal.commandName       = launchRequest.commandName;
+                refusal.wasAccepted       = false;
+                refusal.refusalReason     =
+                    QStringLiteral("Vehicle would not switch to Guided mode");
+                emit vehicleCommandAcknowledged(refusal);
+            }
+            break;
+        }
+
         const auto waiting = m_commandsAwaitingAnswer.find(message.commandNumber);
         if (waiting == m_commandsAwaitingAnswer.end())
             break;                            // an answer to something we did not send
@@ -580,12 +587,43 @@ void MavlinkRadioLink::sendVehicleCommand(VehicleCommandRequest request)
         return;
     }
 
+    // Launching an ArduPilot copter takes two orders, not one.
+    //
+    // A takeoff order is only obeyed in Guided mode, where the
+    // autopilot is flying and we are directing it. In the pilot modes
+    // a person has the sticks and there is nobody for the order to
+    // reach. So the mode change goes out first, and the takeoff waits
+    // for its answer.
+    //
+    // The operator sees none of this. They pressed one button and they
+    // get one answer. Which order that answer came from is our
+    // bookkeeping, not theirs.
+    if (command.commandNumber == kCommandTakeoff
+        && found->autopilotType == kAutopilotArduPilot
+        && !m_launchesAwaitingGuidedMode.contains(request.vehicleIdentifier)) {
+
+        CommandLong modeChange;
+        modeChange.targetSystem    = quint8(request.vehicleIdentifier);
+        modeChange.targetComponent = 1;
+        modeChange.commandNumber   = kCommandDoSetMode;
+        modeChange.parameter1      = float(kBaseModeCustomModeEnabled);
+        modeChange.parameter2      = float(kArduCopterModeGuided);
+
+        m_launchesAwaitingGuidedMode.insert(request.vehicleIdentifier, request);
+        sendCommandLong(modeChange, *found);
+        return;
+    }
+
     m_commandsAwaitingAnswer.insert(command.commandNumber, request);
+    sendCommandLong(command, *found);
+}
 
-    const QByteArray frameBytes = MavlinkFrameCodec::encodeFrame(
-        kCommandLong, command.pack(),
-        m_groundSystemIdentifier, 190 /* MAV_COMP_ID_MISSIONPLANNER */,
-        m_outgoingSequenceNumber++);
-
-    sendFrameBytes(frameBytes, found->lastSeenAddress, found->lastSeenPort);
+void MavlinkRadioLink::sendCommandLong(const CommandLong &command,
+                                       const VehicleRecord &record)
+{
+    sendFrameBytes(MavlinkFrameCodec::encodeFrame(
+                       kCommandLong, command.pack(),
+                       m_groundSystemIdentifier, 190 /* MAV_COMP_ID_MISSIONPLANNER */,
+                       m_outgoingSequenceNumber++),
+                   record.lastSeenAddress, record.lastSeenPort);
 }
