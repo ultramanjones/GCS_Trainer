@@ -76,8 +76,19 @@ bool MavlinkFrameCodec::decodeFirstFrame(QByteArray &buffer,
     while (true) {
         // Throw away anything before a start marker. A radio hands you
         // whatever arrived, including the tail of a frame you missed
-        // the front of.
-        const int markerIndex = buffer.indexOf(static_cast<char>(kStartMarkerVersion2));
+        // the front of. Either version's marker counts, so take
+        // whichever one comes first.
+        const int markerTwo = buffer.indexOf(static_cast<char>(kStartMarkerVersion2));
+        const int markerOne = buffer.indexOf(static_cast<char>(kStartMarkerVersion1));
+
+        int markerIndex = -1;
+        if (markerTwo >= 0 && markerOne >= 0)
+            markerIndex = qMin(markerTwo, markerOne);
+        else if (markerTwo >= 0)
+            markerIndex = markerTwo;
+        else
+            markerIndex = markerOne;
+
         if (markerIndex < 0) {
             buffer.clear();
             return false;
@@ -85,18 +96,30 @@ bool MavlinkFrameCodec::decodeFirstFrame(QByteArray &buffer,
         if (markerIndex > 0)
             buffer.remove(0, markerIndex);
 
-        if (buffer.size() < kHeaderByteCount)
+        const bool isVersionOne =
+            static_cast<quint8>(buffer.at(0)) == kStartMarkerVersion1;
+        const int headerSize = isVersionOne ? kHeaderByteCountVersion1
+                                            : kHeaderByteCount;
+
+        if (buffer.size() < headerSize)
             return false;                      // header not all here yet
 
         const int payloadLength = static_cast<quint8>(buffer.at(1));
-        const int wholeFrameSize = kHeaderByteCount + payloadLength + kChecksumByteCount;
+        const int wholeFrameSize = headerSize + payloadLength + kChecksumByteCount;
         if (buffer.size() < wholeFrameSize)
             return false;                      // payload not all here yet
 
-        const quint32 messageIdentifier =
-              static_cast<quint32>(static_cast<quint8>(buffer.at(7)))
-            | (static_cast<quint32>(static_cast<quint8>(buffer.at(8))) << 8)
-            | (static_cast<quint32>(static_cast<quint8>(buffer.at(9))) << 16);
+        // Version 1 puts a single byte message id at offset 5. Version
+        // 2 puts three bytes at offsets 7, 8 and 9, low byte first.
+        quint32 messageIdentifier = 0;
+        if (isVersionOne) {
+            messageIdentifier = static_cast<quint8>(buffer.at(5));
+        } else {
+            messageIdentifier =
+                  static_cast<quint32>(static_cast<quint8>(buffer.at(7)))
+                | (static_cast<quint32>(static_cast<quint8>(buffer.at(8))) << 8)
+                | (static_cast<quint32>(static_cast<quint8>(buffer.at(9))) << 16);
+        }
 
         const quint16 checksumSent =
               static_cast<quint16>(static_cast<quint8>(buffer.at(wholeFrameSize - 2)))
@@ -104,22 +127,28 @@ bool MavlinkFrameCodec::decodeFirstFrame(QByteArray &buffer,
 
         const quint8 crcExtra = MavlinkMessage::crcExtraForMessage(messageIdentifier);
         const quint16 checksumComputed =
-            computeChecksum(buffer, 1, kHeaderByteCount - 1 + payloadLength, crcExtra);
+            computeChecksum(buffer, 1, headerSize - 1 + payloadLength, crcExtra);
 
         if (checksumSent != checksumComputed) {
             // Bad frame. Step past this start marker and look for the
             // next one. Do not trust the length byte of a frame that
             // failed its check.
+            //
+            // A message we have no entry for in the extra check table
+            // lands here too, because its extra byte comes back zero
+            // and the sum will not match. An autopilot sends dozens of
+            // messages we do not care about, so this is normal traffic
+            // and not a fault.
             ++badFrameCountInOut;
             buffer.remove(0, 1);
             continue;
         }
 
-        frameOut.sequenceNumber      = static_cast<quint8>(buffer.at(4));
-        frameOut.systemIdentifier    = static_cast<quint8>(buffer.at(5));
-        frameOut.componentIdentifier = static_cast<quint8>(buffer.at(6));
+        frameOut.sequenceNumber      = static_cast<quint8>(buffer.at(2 + (isVersionOne ? 0 : 2)));
+        frameOut.systemIdentifier    = static_cast<quint8>(buffer.at(3 + (isVersionOne ? 0 : 2)));
+        frameOut.componentIdentifier = static_cast<quint8>(buffer.at(4 + (isVersionOne ? 0 : 2)));
         frameOut.messageIdentifier   = messageIdentifier;
-        frameOut.payloadBytes        = buffer.mid(kHeaderByteCount, payloadLength);
+        frameOut.payloadBytes        = buffer.mid(headerSize, payloadLength);
 
         buffer.remove(0, wholeFrameSize);
         return true;

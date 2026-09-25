@@ -57,7 +57,60 @@ quint8 crcExtraForMessage(quint32 messageIdentifier)
     case kCommandLong:       return 152;
     case kCommandAck:        return 143;
     case kStatusText:        return 83;
+    case kRequestDataStream: return 148;
+    case kRadioStatus:       return 185;
     default:                 return 0;
+    }
+}
+
+RadioStatus RadioStatus::unpack(const QByteArray &payload)
+{
+    RadioStatus m;
+    m.receiveErrorCount     = readLittleEndian<quint16>(payload, 0);
+    m.correctedPacketCount  = readLittleEndian<quint16>(payload, 2);
+    m.localSignalStrength   = payload.size() > 4 ? quint8(payload.at(4)) : 0;
+    m.remoteSignalStrength  = payload.size() > 5 ? quint8(payload.at(5)) : 0;
+    m.transmitBufferPercent = payload.size() > 6 ? quint8(payload.at(6)) : 0;
+    m.localNoise            = payload.size() > 7 ? quint8(payload.at(7)) : 0;
+    m.remoteNoise           = payload.size() > 8 ? quint8(payload.at(8)) : 0;
+    return m;
+}
+
+QByteArray RequestDataStream::pack() const
+{
+    QByteArray p;
+    appendLittleEndian<quint16>(p, requestedRateHertz);
+    p.append(static_cast<char>(targetSystem));
+    p.append(static_cast<char>(targetComponent));
+    p.append(static_cast<char>(streamIdentifier));
+    p.append(static_cast<char>(startNotStop));
+    return p;
+}
+
+QString arduCopterFlightModeName(quint32 customMode)
+{
+    switch (customMode) {
+    case 0:  return QStringLiteral("Stabilize");
+    case 1:  return QStringLiteral("Acro");
+    case 2:  return QStringLiteral("AltHold");
+    case 3:  return QStringLiteral("Auto");
+    case 4:  return QStringLiteral("Guided");
+    case 5:  return QStringLiteral("Loiter");
+    case 6:  return QStringLiteral("RTL");
+    case 7:  return QStringLiteral("Circle");
+    case 9:  return QStringLiteral("Land");
+    case 11: return QStringLiteral("Drift");
+    case 13: return QStringLiteral("Sport");
+    case 14: return QStringLiteral("Flip");
+    case 15: return QStringLiteral("AutoTune");
+    case 16: return QStringLiteral("PosHold");
+    case 17: return QStringLiteral("Brake");
+    case 18: return QStringLiteral("Throw");
+    case 20: return QStringLiteral("Guided NoGPS");
+    case 21: return QStringLiteral("Smart RTL");
+    case 25: return QStringLiteral("SystemID");
+    case 27: return QStringLiteral("Auto RTL");
+    default: return QStringLiteral("Mode %1").arg(customMode);
     }
 }
 

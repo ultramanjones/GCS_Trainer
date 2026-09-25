@@ -81,7 +81,14 @@ public:
                                    int byteCount,
                                    quint8 messageCrcExtra);
 
+    // Version 2 frames start with 0xFD and have a ten byte header.
+    // Version 1 frames start with 0xFE and have a six byte header with
+    // a one byte message id. We send version 2 always, and read
+    // either, because ArduPilot opens a new connection speaking
+    // version 1 and only switches up once it hears version 2 from us.
     static constexpr quint8 kStartMarkerVersion2 = 0xFD;
-    static constexpr int    kHeaderByteCount     = 10;
-    static constexpr int    kChecksumByteCount   = 2;
+    static constexpr quint8 kStartMarkerVersion1 = 0xFE;
+    static constexpr int    kHeaderByteCount           = 10;
+    static constexpr int    kHeaderByteCountVersion1   = 6;
+    static constexpr int    kChecksumByteCount         = 2;
 };

@@ -8,6 +8,8 @@
 #include <QUdpSocket>
 #include <QtMath>
 
+#include <utility>
+
 using namespace MavlinkMessage;
 
 namespace {
@@ -37,10 +39,21 @@ MavlinkRadioLink::MavlinkRadioLink(quint16 listenPort,
     , m_listenPort(listenPort)
     , m_groundSystemIdentifier(groundSystemIdentifier)
 {
+    // The timers are made children of this object on purpose. A QTimer
+    // that is only a member and not a child does not travel with its
+    // owner through moveToThread. It stays on the thread it was made
+    // on, and starting it from the worker thread does nothing at all
+    // except print "Timers cannot be started from another thread".
+    m_publishTimer.setParent(this);
+    m_watchdogTimer.setParent(this);
+    m_heartbeatTimer.setParent(this);
+
     m_publishTimer.setInterval(kPublishMilliseconds);
     m_watchdogTimer.setInterval(kWatchdogMilliseconds);
+    m_heartbeatTimer.setInterval(kHeartbeatMilliseconds);
     connect(&m_publishTimer,  &QTimer::timeout, this, &MavlinkRadioLink::publishSitReps);
     connect(&m_watchdogTimer, &QTimer::timeout, this, &MavlinkRadioLink::checkForVehiclesGoneQuiet);
+    connect(&m_heartbeatTimer, &QTimer::timeout, this, &MavlinkRadioLink::sendGroundHeartbeat);
 }
 
 MavlinkRadioLink::MavlinkRadioLink(const QString &hostName,
@@ -53,10 +66,21 @@ MavlinkRadioLink::MavlinkRadioLink(const QString &hostName,
     , m_listenPort(port)
     , m_groundSystemIdentifier(groundSystemIdentifier)
 {
+    // The timers are made children of this object on purpose. A QTimer
+    // that is only a member and not a child does not travel with its
+    // owner through moveToThread. It stays on the thread it was made
+    // on, and starting it from the worker thread does nothing at all
+    // except print "Timers cannot be started from another thread".
+    m_publishTimer.setParent(this);
+    m_watchdogTimer.setParent(this);
+    m_heartbeatTimer.setParent(this);
+
     m_publishTimer.setInterval(kPublishMilliseconds);
     m_watchdogTimer.setInterval(kWatchdogMilliseconds);
+    m_heartbeatTimer.setInterval(kHeartbeatMilliseconds);
     connect(&m_publishTimer,  &QTimer::timeout, this, &MavlinkRadioLink::publishSitReps);
     connect(&m_watchdogTimer, &QTimer::timeout, this, &MavlinkRadioLink::checkForVehiclesGoneQuiet);
+    connect(&m_heartbeatTimer, &QTimer::timeout, this, &MavlinkRadioLink::sendGroundHeartbeat);
 }
 
 MavlinkRadioLink::~MavlinkRadioLink() = default;
@@ -96,6 +120,7 @@ void MavlinkRadioLink::startListening()
         m_streamSocket->connectToHost(m_hostName, m_listenPort);
         m_publishTimer.start();
         m_watchdogTimer.start();
+        m_heartbeatTimer.start();
         return;
     }
 
@@ -111,12 +136,14 @@ void MavlinkRadioLink::startListening()
     connect(m_socket, &QUdpSocket::readyRead, this, &MavlinkRadioLink::readPendingDatagrams);
     m_publishTimer.start();
     m_watchdogTimer.start();
+    m_heartbeatTimer.start();
 }
 
 void MavlinkRadioLink::stopListening()
 {
     m_publishTimer.stop();
     m_watchdogTimer.stop();
+    m_heartbeatTimer.stop();
     if (m_socket) {
         m_socket->close();
         delete m_socket;
@@ -136,6 +163,7 @@ void MavlinkRadioLink::readPendingDatagrams()
     // this loops until the socket is empty.
     while (m_socket && m_socket->hasPendingDatagrams()) {
         const QNetworkDatagram datagram = m_socket->receiveDatagram();
+        m_totalBytesReceived += datagram.data().size();
         m_receiveBuffer.append(datagram.data());
 
         // One datagram can hold several frames, and a frame can be split
@@ -153,7 +181,9 @@ void MavlinkRadioLink::readPendingStreamBytes()
     if (!m_streamSocket)
         return;
 
-    m_receiveBuffer.append(m_streamSocket->readAll());
+    const QByteArray arrived = m_streamSocket->readAll();
+    m_totalBytesReceived += arrived.size();
+    m_receiveBuffer.append(arrived);
     drainReceiveBuffer(m_streamSocket->peerAddress(), quint16(m_streamSocket->peerPort()));
 }
 
@@ -170,6 +200,80 @@ void MavlinkRadioLink::drainReceiveBuffer(const QHostAddress &fromAddress, quint
     // of memory over a long flight.
     if (m_receiveBuffer.size() > 64 * 1024)
         m_receiveBuffer.clear();
+}
+
+void MavlinkRadioLink::requestTelemetryFrom(quint8 targetSystem,
+                                           quint8 targetComponent,
+                                           const QHostAddress &toAddress,
+                                           quint16 toPort)
+{
+    RequestDataStream request;
+    request.targetSystem    = targetSystem;
+    request.targetComponent = targetComponent;
+    request.streamIdentifier = kDataStreamAll;
+    request.requestedRateHertz = 10;
+    request.startNotStop = 1;
+
+    sendFrameBytes(MavlinkFrameCodec::encodeFrame(kRequestDataStream,
+                                                  request.pack(),
+                                                  m_groundSystemIdentifier,
+                                                  190,
+                                                  m_outgoingSequenceNumber++),
+                   toAddress, toPort);
+}
+
+// A ground station announces itself once a second, same as a vehicle
+// does. Two reasons it matters here. An autopilot watches for the
+// ground station going silent and can act on it. And ArduPilot opens a
+// connection speaking MAVLink version 1 and only moves up to version 2
+// once it has heard a version 2 frame from us - this is that frame.
+void MavlinkRadioLink::sendGroundHeartbeat()
+{
+    // Temporary. Says once a second what the link is actually doing,
+    // so a silent screen can be told apart from a dead socket.
+    if (m_transport == Transport::TcpConnect) {
+        qInfo("LINK tcp state=%d bytesIn=%lld frames=%d bad=%d buffer=%lld vehicles=%d",
+              m_streamSocket ? int(m_streamSocket->state()) : -1,
+              m_totalBytesReceived, m_framesReceivedCount, m_badFrameCount,
+              qint64(m_receiveBuffer.size()), m_vehicleRecords.size());
+        for (auto it = m_vehicleRecords.cbegin(); it != m_vehicleRecords.cend(); ++it) {
+            qInfo("  veh %d mode=%s armed=%d sats=%d fix=%d batt=%.0f alt=%.1f lost=%d",
+                  it.key(), qPrintable(it->sitRep.flightModeName),
+                  int(it->sitRep.isArmed), it->sitRep.satelliteCount,
+                  it->sitRep.gpsFixType, it->sitRep.battery.chargePercent(),
+                  it->sitRep.position.altitudeMetersAboveHome(),
+                  int(it->hasBeenReportedLost));
+        }
+    } else {
+        qInfo("LINK udp bytesIn=%lld frames=%d bad=%d vehicles=%d",
+              m_totalBytesReceived, m_framesReceivedCount, m_badFrameCount,
+              m_vehicleRecords.size());
+    }
+
+    Heartbeat beat;
+    beat.vehicleType    = 6;    // MAV_TYPE_GCS
+    beat.autopilotType  = 8;    // MAV_AUTOPILOT_INVALID, what a GCS sends
+    beat.baseMode       = 0;
+    beat.customMode     = 0;
+    beat.systemStatus   = 4;    // MAV_STATE_ACTIVE
+    beat.mavlinkVersion = 3;
+
+    const QByteArray frameBytes =
+        MavlinkFrameCodec::encodeFrame(kHeartbeat, beat.pack(),
+                                       m_groundSystemIdentifier, 190,
+                                       m_outgoingSequenceNumber++);
+
+    if (m_transport == Transport::TcpConnect) {
+        sendFrameBytes(frameBytes, QHostAddress(), 0);
+        return;
+    }
+
+    // On UDP there is nowhere to send until somebody has been heard
+    // from. Beat at everyone we know about.
+    for (const VehicleRecord &record : std::as_const(m_vehicleRecords)) {
+        if (record.lastSeenPort != 0)
+            sendFrameBytes(frameBytes, record.lastSeenAddress, record.lastSeenPort);
+    }
 }
 
 void MavlinkRadioLink::sendFrameBytes(const QByteArray &frameBytes,
@@ -194,6 +298,12 @@ MavlinkRadioLink::VehicleRecord &MavlinkRadioLink::recordFor(int vehicleIdentifi
     if (it == m_vehicleRecords.end()) {
         VehicleRecord fresh;
         fresh.sitRep.vehicleIdentifier = vehicleIdentifier;
+
+        // Minus one means nobody has told us. A link with no radio in
+        // it - a cable, a network socket, a simulator - never sends
+        // RADIO_STATUS, and showing zero percent there would read as a
+        // dying link instead of a question nobody asked.
+        fresh.sitRep.radioSignalPercent = -1;
         it = m_vehicleRecords.insert(vehicleIdentifier, fresh);
     }
     return it.value();
@@ -203,6 +313,14 @@ void MavlinkRadioLink::handleFrame(const MavlinkFrame &frame,
                                    const QHostAddress &fromAddress,
                                    quint16 fromPort)
 {
+    // Our own traffic, handed back to us. Links echo: a router in the
+    // middle, a radio in loopback, or a simulator forwarding
+    // everything to everything. Without this a ground station adds
+    // itself to its own vehicle list, then reports itself out of
+    // contact the moment it stops talking.
+    if (frame.systemIdentifier == m_groundSystemIdentifier)
+        return;
+
     const int vehicleIdentifier = frame.systemIdentifier;
     VehicleRecord &record = recordFor(vehicleIdentifier);
 
@@ -235,8 +353,39 @@ void MavlinkRadioLink::handleFrame(const MavlinkFrame &frame,
 
     case kHeartbeat: {
         const Heartbeat message = Heartbeat::unpack(frame.payloadBytes);
-        record.sitRep.flightModeName = flightModeName(message.customMode);
+
+        // Mode numbers mean nothing on their own. Each autopilot has
+        // its own list, and the heartbeat is what says which list to
+        // read. Guess wrong and the screen shows a confident, wrong
+        // mode name, which is worse than showing none.
+        record.sitRep.flightModeName =
+            (message.autopilotType == kAutopilotArduPilot)
+                ? arduCopterFlightModeName(message.customMode)
+                : flightModeName(message.customMode);
+
         record.sitRep.isArmed = (message.baseMode & Heartbeat::kArmedFlag) != 0;
+
+        // First heartbeat from this vehicle. Ask it to start sending
+        // telemetry. A real autopilot says nothing but heartbeats
+        // until somebody asks.
+        if (!record.hasBeenAskedToStream) {
+            record.hasBeenAskedToStream = true;
+            requestTelemetryFrom(quint8(vehicleIdentifier),
+                                 frame.componentIdentifier,
+                                 fromAddress, fromPort);
+        }
+        break;
+    }
+
+    case kRadioStatus: {
+        const RadioStatus message = RadioStatus::unpack(frame.payloadBytes);
+
+        // Report the weaker of the two ends. A link is only as good as
+        // its worse direction, and the operator wants the bad news.
+        const int weakestRaw = qMin(int(message.localSignalStrength),
+                                    int(message.remoteSignalStrength));
+        record.sitRep.radioSignalPercent =
+            (weakestRaw * 100) / RadioStatus::kFullStrengthRawValue;
         break;
     }
 

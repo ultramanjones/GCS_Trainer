@@ -36,6 +36,8 @@ inline constexpr quint32 kVfrHud             = 74;
 inline constexpr quint32 kCommandLong        = 76;
 inline constexpr quint32 kCommandAck         = 77;
 inline constexpr quint32 kStatusText         = 253;
+inline constexpr quint32 kRequestDataStream  = 66;
+inline constexpr quint32 kRadioStatus        = 109;
 
 // The extra check byte for each message above.
 quint8 crcExtraForMessage(quint32 messageIdentifier);
@@ -64,6 +66,18 @@ inline constexpr quint32 kModeReturning = 3;
 inline constexpr quint32 kModeLanding   = 4;
 
 QString flightModeName(quint32 customMode);
+
+// ArduPilot does not use the mode numbers above. Every autopilot puts
+// its own numbering in the custom mode field, and a ground station
+// keeps a table per autopilot. This is ArduCopter's.
+QString arduCopterFlightModeName(quint32 customMode);
+
+// MAV_AUTOPILOT_ARDUPILOTMEGA. Told to us in every heartbeat, which is
+// how we know which mode table to use.
+inline constexpr quint8 kAutopilotArduPilot = 3;
+
+// Stream numbers for REQUEST_DATA_STREAM. Zero means every stream.
+inline constexpr quint8 kDataStreamAll = 0;
 
 // ---------------------------------------------------------------------------
 // The messages themselves, as plain structs with a pack and an unpack.
@@ -184,6 +198,46 @@ struct StatusText
 
     QByteArray pack() const;
     static StatusText unpack(const QByteArray &payload);
+};
+
+// How the telemetry radio itself is doing. This one does not come
+// from the autopilot. The radio on the ground writes it and puts it in
+// the stream, which is why signal strength is missing on a link that
+// has no radio in it, like a cable or a network socket.
+//
+// rssi runs 0 to 254, not 0 to 100.
+struct RadioStatus
+{
+    quint16 receiveErrorCount = 0;
+    quint16 correctedPacketCount = 0;
+    quint8  localSignalStrength = 0;
+    quint8  remoteSignalStrength = 0;
+    quint8  transmitBufferPercent = 0;
+    quint8  localNoise = 0;
+    quint8  remoteNoise = 0;
+
+    static RadioStatus unpack(const QByteArray &payload);
+
+    static constexpr int kFullStrengthRawValue = 254;
+};
+
+// Asks the vehicle to start sending. An autopilot will sit there
+// silent on a fresh connection until something asks, because a radio
+// link has limited room and it does not know what anybody wants.
+//
+// This message is marked deprecated in the MAVLink documentation, and
+// the replacement is SET_MESSAGE_INTERVAL, one call per message. Every
+// ArduPilot build still honors this one, and one message is simpler
+// than twenty, so it is what we send.
+struct RequestDataStream
+{
+    quint16 requestedRateHertz = 4;
+    quint8  targetSystem = 1;
+    quint8  targetComponent = 1;
+    quint8  streamIdentifier = kDataStreamAll;
+    quint8  startNotStop = 1;
+
+    QByteArray pack() const;
 };
 
 } // namespace MavlinkMessage

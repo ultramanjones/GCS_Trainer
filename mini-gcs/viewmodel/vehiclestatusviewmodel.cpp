@@ -34,9 +34,19 @@ QString VehicleStatusViewModel::gpsFixDescription() const
 {
     // Turning a number into words for the screen is organizing, which
     // is this layer's job. The view never has to learn what a 3 means.
+    //
+    // The numbers above 3 are all better than a plain 3D fix, not
+    // worse. Lumping them into "No Fix" tells the operator the worst
+    // thing when the truth is the best thing, which is exactly the
+    // kind of lie a status bar must not tell.
     switch (m_gpsFixType) {
-    case 3:  return QStringLiteral("3D Fix");
     case 2:  return QStringLiteral("2D Fix");
+    case 3:  return QStringLiteral("3D Fix");
+    case 4:  return QStringLiteral("DGPS");
+    case 5:  return QStringLiteral("RTK Float");
+    case 6:  return QStringLiteral("RTK Fixed");
+    case 7:  return QStringLiteral("Static");
+    case 8:  return QStringLiteral("PPP");
     default: return QStringLiteral("No Fix");
     }
 }

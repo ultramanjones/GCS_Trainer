@@ -98,6 +98,7 @@ private:
         bool         hasHomePosition = false;
         double       homeLatitudeDegrees = 0.0;
         double       homeLongitudeDegrees = 0.0;
+        bool         hasBeenAskedToStream = false;
         quint8       lastSequenceNumber = 0;
         bool         hasSeenAnySequence = false;
     };
@@ -110,6 +111,14 @@ private:
 
     // Pulls whole frames out of the receive buffer and hands them on.
     // Both transports feed the same buffer and call this.
+    // Tells a vehicle to start sending telemetry, and how often.
+    void requestTelemetryFrom(quint8 targetSystem,
+                              quint8 targetComponent,
+                              const QHostAddress &toAddress,
+                              quint16 toPort);
+
+    void sendGroundHeartbeat();
+
     void drainReceiveBuffer(const QHostAddress &fromAddress, quint16 fromPort);
 
     // Writes finished bytes to whichever socket is open.
@@ -144,11 +153,14 @@ private:
 
     QTimer m_publishTimer;
     QTimer m_watchdogTimer;
+    QTimer m_heartbeatTimer;
 
+    qint64 m_totalBytesReceived = 0;
     int m_badFrameCount = 0;
     int m_framesReceivedCount = 0;
 
     static constexpr int kPublishMilliseconds  = 50;    // twenty times a second
     static constexpr int kWatchdogMilliseconds = 250;
+    static constexpr int kHeartbeatMilliseconds = 1000;  // once a second
     static constexpr qint64 kQuietForTooLongMilliseconds = 1500;
 };

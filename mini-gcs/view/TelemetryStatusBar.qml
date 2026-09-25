@@ -71,8 +71,16 @@ Rectangle {
 
         StatusReadout {
             labelText: "RADIO"
-            valueText: vehicleStatusViewModel.radioSignalPercent + "%"
-            valueColor: vehicleStatusViewModel.radioSignalPercent < 30
+
+            // A negative reading means nobody reported one. A link
+            // with no radio in it, like a cable or a network socket,
+            // has no signal strength to give, and a dash says that
+            // where a zero would read as a dying link.
+            valueText: vehicleStatusViewModel.radioSignalPercent < 0
+                       ? "--"
+                       : vehicleStatusViewModel.radioSignalPercent + "%"
+            valueColor: (vehicleStatusViewModel.radioSignalPercent >= 0
+                         && vehicleStatusViewModel.radioSignalPercent < 30)
                         ? GcsTheme.criticalStateColor
                         : GcsTheme.normalTextColor
         }
