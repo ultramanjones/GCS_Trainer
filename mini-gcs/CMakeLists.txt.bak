@@ -90,28 +90,4 @@ target_include_directories(mini_gcs PRIVATE .)
 target_link_libraries(mini_gcs PRIVATE
     Qt6::Quick
     Qt6::QuickControls2
-    mavlink_link
 )
-
-# Which radio the ground station talks to, chosen when the project is
-# configured rather than when it runs. OFF is the fake radio and the
-# simulated airspace, all in memory, no network. ON is the real MAVLink
-# link listening on a UDP port, which needs the vehicle simulator
-# running beside it.
-#
-# Nothing above the radio changes either way. That is the point of
-# RadioLinkInterface, and it is worth saying out loud in an interview.
-option(GCS_USE_MAVLINK_RADIO "Talk MAVLink over UDP instead of the in-memory simulation" OFF)
-
-# How the MAVLink link is plumbed. OFF binds a UDP port and waits,
-# which is what our vehicle simulator and most real radios send to. ON
-# dials out over TCP to 127.0.0.1:5762, which is what Mission Planner's
-# built in simulator offers on Windows.
-option(GCS_MAVLINK_TCP "Dial out over TCP instead of binding a UDP port" OFF)
-
-if(GCS_USE_MAVLINK_RADIO)
-    target_compile_definitions(mini_gcs PRIVATE GCS_USE_MAVLINK_RADIO)
-    if(GCS_MAVLINK_TCP)
-        target_compile_definitions(mini_gcs PRIVATE GCS_MAVLINK_TCP)
-    endif()
-endif()

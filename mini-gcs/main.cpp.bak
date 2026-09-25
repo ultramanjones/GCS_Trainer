@@ -16,12 +16,6 @@
 #include "viewmodel/vehiclegroundtrackviewmodel.h"
 #include "viewmodel/vehiclestatusviewmodel.h"
 
-// The real radio is only compiled in when the project is configured
-// with GCS_USE_MAVLINK_RADIO turned on. See mini-gcs/CMakeLists.txt.
-#ifdef GCS_USE_MAVLINK_RADIO
-#include "mavlink/mavlinkradiolink.h"
-#endif
-
 // THE COMPOSITION ROOT.
 //
 // The one and only place in this program where objects are built and
@@ -60,39 +54,15 @@ int main(int argc, char *argv[])
     // are about to move to a different thread than everything else in
     // this function. They delete themselves when the thread finishes,
     // through the connection made further down.
-    QThread radioThread;
-
-#ifdef GCS_USE_MAVLINK_RADIO
-    // The real radio. It listens for MAVLink frames on a UDP port and
-    // there is no simulated airspace at all, because the vehicle is a
-    // separate program on the other end of the socket.
-    SimulatedAirspace *simulatedAirspace = nullptr;
-  #ifdef GCS_MAVLINK_TCP
-    // Dial out. Mission Planner's built in simulator offers this.
-    // Port 5760 is taken by Mission Planner itself. 5762 and 5763 are
-    // left open for other ground stations.
-    RadioLinkInterface *radioLink = new MavlinkRadioLink(QStringLiteral("127.0.0.1"), 5762);
-  #else
-    // Bind a port and wait. This is what a radio, a wifi telemetry
-    // bridge, or our own vehicle simulator sends to.
-    RadioLinkInterface *radioLink = new MavlinkRadioLink(quint16(14550));
-  #endif
-#else
-    // The fake radio. The vehicle lives in memory in this same
-    // program and nothing touches the network.
+    QThread simulatedAirspaceThread;
     auto *simulatedAirspace = new SimulatedAirspace();
-    RadioLinkInterface *radioLink = new SimulatedRadioLink(simulatedAirspace);
-#endif
+    auto *simulatedRadioLink = new SimulatedRadioLink(simulatedAirspace);
 
-    // Whichever one it is, everything below this point is identical.
-    // The rest of the program only ever sees RadioLinkInterface.
-    if (simulatedAirspace != nullptr) {
-        simulatedAirspace->moveToThread(&radioThread);
-    }
-    radioLink->moveToThread(&radioThread);
+    simulatedAirspace->moveToThread(&simulatedAirspaceThread);
+    simulatedRadioLink->moveToThread(&simulatedAirspaceThread);
 
     // ---- The ground ----
-    GroundControlStation groundControlStation(radioLink);
+    GroundControlStation groundControlStation(simulatedRadioLink);
 
     VehicleStatusViewModel vehicleStatusViewModel(&groundControlStation);
     VehicleGroundTrackViewModel vehicleGroundTrackViewModel(&groundControlStation);
@@ -106,33 +76,33 @@ int main(int argc, char *argv[])
     // on different threads for the whole life of this program. There
     // is nothing for Qt to guess, and writing it out tells the next
     // reader what is going on.
-    QObject::connect(radioLink, &RadioLinkInterface::vehicleSitRepReceived,
+    QObject::connect(simulatedRadioLink, &RadioLinkInterface::vehicleSitRepReceived,
                      &groundControlStation, &GroundControlStation::receiveSitRep,
                      Qt::QueuedConnection);
 
-    QObject::connect(radioLink, &RadioLinkInterface::vehicleCommandAcknowledged,
+    QObject::connect(simulatedRadioLink, &RadioLinkInterface::vehicleCommandAcknowledged,
                      &groundControlStation, &GroundControlStation::receiveCommandAcknowledgment,
                      Qt::QueuedConnection);
 
-    QObject::connect(radioLink, &RadioLinkInterface::contactLostWithVehicle,
+    QObject::connect(simulatedRadioLink, &RadioLinkInterface::contactLostWithVehicle,
                      &groundControlStation, &GroundControlStation::noteContactLostWithVehicle,
                      Qt::QueuedConnection);
 
-    QObject::connect(radioLink, &RadioLinkInterface::contactRegainedWithVehicle,
+    QObject::connect(simulatedRadioLink, &RadioLinkInterface::contactRegainedWithVehicle,
                      &groundControlStation, &GroundControlStation::noteContactRegainedWithVehicle,
                      Qt::QueuedConnection);
 
     // ---- Wiring, part two: orders going out to the radio ----
     QObject::connect(&groundControlStation, &GroundControlStation::vehicleCommandReadyToSend,
-                     radioLink, &RadioLinkInterface::sendVehicleCommand,
+                     simulatedRadioLink, &RadioLinkInterface::sendVehicleCommand,
                      Qt::QueuedConnection);
 
     QObject::connect(&groundControlStation, &GroundControlStation::radioUnplugRequested,
-                     radioLink, &RadioLinkInterface::stopListening,
+                     simulatedRadioLink, &RadioLinkInterface::stopListening,
                      Qt::QueuedConnection);
 
     QObject::connect(&groundControlStation, &GroundControlStation::radioReconnectRequested,
-                     radioLink, &RadioLinkInterface::startListening,
+                     simulatedRadioLink, &RadioLinkInterface::startListening,
                      Qt::QueuedConnection);
 
     // ---- Wiring, part three: the ground station to the screens ----
@@ -164,24 +134,20 @@ int main(int argc, char *argv[])
     // Time and listening both start only once the worker thread is
     // really running its own event loop. Starting them one line
     // earlier would run their timers on the main thread by mistake.
-    if (simulatedAirspace != nullptr) {
-        QObject::connect(&radioThread, &QThread::started,
-                         simulatedAirspace, &SimulatedAirspace::startTime);
-    }
-    QObject::connect(&radioThread, &QThread::started,
-                     radioLink, &RadioLinkInterface::startListening);
+    QObject::connect(&simulatedAirspaceThread, &QThread::started,
+                     simulatedAirspace, &SimulatedAirspace::startTime);
+    QObject::connect(&simulatedAirspaceThread, &QThread::started,
+                     simulatedRadioLink, &RadioLinkInterface::startListening);
 
     // Both objects delete themselves on their OWN thread. A QObject's
     // timers belong to the thread the object lives on, and deleting it
     // from another thread makes Qt complain on the way out.
-    QObject::connect(&radioThread, &QThread::finished,
-                     radioLink, &QObject::deleteLater);
-    if (simulatedAirspace != nullptr) {
-        QObject::connect(&radioThread, &QThread::finished,
-                         simulatedAirspace, &QObject::deleteLater);
-    }
+    QObject::connect(&simulatedAirspaceThread, &QThread::finished,
+                     simulatedRadioLink, &QObject::deleteLater);
+    QObject::connect(&simulatedAirspaceThread, &QThread::finished,
+                     simulatedAirspace, &QObject::deleteLater);
 
-    radioThread.start();
+    simulatedAirspaceThread.start();
 
     // ---- The window ----
     QQmlApplicationEngine qmlEngine;
@@ -211,8 +177,8 @@ int main(int argc, char *argv[])
     // Shut the worker thread down. quit asks its event loop to stop.
     // wait blocks until it really has. The two objects out there
     // delete themselves on the way, through the connections above.
-    radioThread.quit();
-    radioThread.wait();
+    simulatedAirspaceThread.quit();
+    simulatedAirspaceThread.wait();
 
     return exitCode;
 }
