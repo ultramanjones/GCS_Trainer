@@ -3,11 +3,13 @@
 #include "mavlink/mavlinkframe.h"
 
 #include <QDateTime>
+#include <QList>
 #include <QNetworkDatagram>
 #include <QTcpSocket>
 #include <QUdpSocket>
 #include <QtMath>
 
+#include <optional>
 #include <utility>
 
 using namespace MavlinkMessage;
@@ -199,11 +201,15 @@ void MavlinkRadioLink::drainReceiveBuffer(const QHostAddress &fromAddress, quint
         m_receiveBuffer.clear();
 }
 
+
 void MavlinkRadioLink::requestTelemetryFrom(quint8 targetSystem,
                                            quint8 targetComponent,
-                                           const QHostAddress &toAddress,
-                                           quint16 toPort)
+                                           const VehicleRecord &record)
 {
+    const MavlinkLinkPath *mainPath = record.linkPaths.mainPath();
+    if (!mainPath)
+        return;
+
     RequestDataStream request;
     request.targetSystem    = targetSystem;
     request.targetComponent = targetComponent;
@@ -216,7 +222,7 @@ void MavlinkRadioLink::requestTelemetryFrom(quint8 targetSystem,
                                                   m_groundSystemIdentifier,
                                                   190,
                                                   m_outgoingSequenceNumber++),
-                   toAddress, toPort);
+                   mainPath->address(), mainPath->port());
 }
 
 // A ground station announces itself once a second, same as a vehicle
@@ -245,10 +251,12 @@ void MavlinkRadioLink::sendGroundHeartbeat()
     }
 
     // On UDP there is nowhere to send until somebody has been heard
-    // from. Beat at everyone we know about.
+    // from. The heartbeat goes out on EVERY path, not just the main
+    // one, so the vehicle knows each path still works in both
+    // directions.
     for (const VehicleRecord &record : std::as_const(m_vehicleRecords)) {
-        if (record.lastSeenPort != 0)
-            sendFrameBytes(frameBytes, record.lastSeenAddress, record.lastSeenPort);
+        for (const MavlinkLinkPath &path : record.linkPaths.allPaths())
+            sendFrameBytes(frameBytes, path.address(), path.port());
     }
 }
 
@@ -299,35 +307,46 @@ void MavlinkRadioLink::handleFrame(const MavlinkFrame &frame,
 
     const int vehicleIdentifier = frame.systemIdentifier;
     VehicleRecord &record = recordFor(vehicleIdentifier);
+    const qint64 nowMilliseconds = QDateTime::currentMSecsSinceEpoch();
 
-    // Remember where to send commands. A ground station learns a
-    // vehicle's address by hearing from it, not by being configured.
-    record.lastSeenAddress = fromAddress;
-    record.lastSeenPort = fromPort;
-    record.lastHeardMilliseconds = QDateTime::currentMSecsSinceEpoch();
+    // Note which path this frame came in on. A ground station learns a
+    // vehicle's paths by hearing from it, not by being configured. The
+    // path also counts frames lost on the way, from the sequence
+    // number.
+    const bool cameOnMainPath =
+        record.linkPaths.noteFrameHeard(fromAddress, fromPort,
+                                        frame.componentIdentifier,
+                                        frame.sequenceNumber,
+                                        nowMilliseconds);
+    reportLinkPathNotices(vehicleIdentifier, record);
+
+    // Any path counts as contact. The vehicle is lost only when every
+    // path is quiet.
+    record.lastHeardMilliseconds = nowMilliseconds;
 
     if (record.hasBeenReportedLost) {
         record.hasBeenReportedLost = false;
         emit contactRegainedWithVehicle(vehicleIdentifier);
     }
 
-    // Sequence numbers count up and wrap at 255. A gap means frames
-    // were lost on the way. The operator should be told the link is
-    // lossy rather than left to wonder why the display stutters.
-    if (record.hasSeenAnySequence) {
-        const quint8 expected = quint8(record.lastSequenceNumber + 1);
-        if (frame.sequenceNumber != expected) {
-            const int missing = quint8(frame.sequenceNumber - expected);
-            if (missing > 0 && missing < 128)
-                m_badFrameCount += missing;
-        }
-    }
-    record.lastSequenceNumber = frame.sequenceNumber;
-    record.hasSeenAnySequence = true;
-
+    // Which copy of a message to believe, when the same vehicle is
+    // heard on more than one path:
+    //
+    //   - Position, attitude and GPS carry the vehicle's own clock.
+    //     They are taken from any path, and the stale message filter
+    //     drops copies and late arrivals.
+    //   - Everything else carries no clock, so there is no way to tell
+    //     which copy is newer. Those are taken from the main path only.
+    //     A copy on a backup path still counts as contact, above.
+    //   - A command answer is taken from any path. The first copy
+    //     matches its order. A second copy finds nothing waiting and is
+    //     ignored.
     switch (frame.messageIdentifier) {
 
     case kHeartbeat: {
+        if (!cameOnMainPath)
+            break;
+
         const Heartbeat message = Heartbeat::unpack(frame.payloadBytes);
 
         // Mode numbers mean nothing on their own. Each autopilot has
@@ -348,13 +367,17 @@ void MavlinkRadioLink::handleFrame(const MavlinkFrame &frame,
         if (!record.hasBeenAskedToStream) {
             record.hasBeenAskedToStream = true;
             requestTelemetryFrom(quint8(vehicleIdentifier),
-                                 frame.componentIdentifier,
-                                 fromAddress, fromPort);
+                                 frame.componentIdentifier, record);
         }
         break;
     }
 
     case kRadioStatus: {
+        // The radio on the ground writes this about its own link, so
+        // a copy from another path describes a different radio.
+        if (!cameOnMainPath)
+            break;
+
         const RadioStatus message = RadioStatus::unpack(frame.payloadBytes);
 
         // Report the weaker of the two ends. A link is only as good as
@@ -367,6 +390,9 @@ void MavlinkRadioLink::handleFrame(const MavlinkFrame &frame,
     }
 
     case kSystemStatus: {
+        if (!cameOnMainPath)
+            break;
+
         const SystemStatus message = SystemStatus::unpack(frame.payloadBytes);
         record.sitRep.battery.setChargePercent(double(message.batteryRemainingPercent));
         break;
@@ -374,6 +400,9 @@ void MavlinkRadioLink::handleFrame(const MavlinkFrame &frame,
 
     case kGpsRawInt: {
         const GpsRawInt message = GpsRawInt::unpack(frame.payloadBytes);
+        if (!record.staleMessageFilter.isNewestSoFar(kGpsRawInt, message.timeMicroseconds))
+            break;
+
         record.sitRep.gpsFixType = message.fixType;
         record.sitRep.satelliteCount = message.satellitesVisible;
         break;
@@ -381,17 +410,29 @@ void MavlinkRadioLink::handleFrame(const MavlinkFrame &frame,
 
     case kAttitude: {
         const Attitude message = Attitude::unpack(frame.payloadBytes);
+        if (!record.staleMessageFilter.isNewestSoFar(
+                kAttitude, quint64(message.timeSinceBootMilliseconds) * 1000))
+            break;
+
         // MAVLink sends angles in radians. People read degrees.
         // Converting here means no layer above ever does trigonometry.
         record.sitRep.attitude.setTargetRollDegrees(qRadiansToDegrees(double(message.rollRadians)));
         record.sitRep.attitude.setTargetPitchDegrees(qRadiansToDegrees(double(message.pitchRadians)));
         record.sitRep.attitude.setHeadingDegrees(qRadiansToDegrees(double(message.yawRadians)));
+
+        // 0.05 seconds times 20 per second is 1, so this moves all the
+        // way to the new angle. The display shows the real value with
+        // no smoothing and no lag.
         record.sitRep.attitude.easeTowardTargets(0.05, 20.0);
         break;
     }
 
     case kGlobalPositionInt: {
         const GlobalPositionInt message = GlobalPositionInt::unpack(frame.payloadBytes);
+        if (!record.staleMessageFilter.isNewestSoFar(
+                kGlobalPositionInt, quint64(message.timeSinceBootMilliseconds) * 1000))
+            break;
+
         const double latitudeDegrees  = message.latitudeDegreesTimes1e7  * kDegreesPerRawUnit;
         const double longitudeDegrees = message.longitudeDegreesTimes1e7 * kDegreesPerRawUnit;
 
@@ -429,6 +470,9 @@ void MavlinkRadioLink::handleFrame(const MavlinkFrame &frame,
     }
 
     case kVfrHud: {
+        if (!cameOnMainPath)
+            break;
+
         const VfrHud message = VfrHud::unpack(frame.payloadBytes);
         record.sitRep.airspeedMetersPerSecond    = double(message.airspeedMetersPerSecond);
         record.sitRep.groundspeedMetersPerSecond = double(message.groundspeedMetersPerSecond);
@@ -438,43 +482,41 @@ void MavlinkRadioLink::handleFrame(const MavlinkFrame &frame,
     case kCommandAck: {
         const CommandAck message = CommandAck::unpack(frame.payloadBytes);
 
+        const std::optional<MavlinkCommandsAwaitingAnswer::AwaitedCommand> answered =
+            m_commandsAwaitingAnswer.takeCommandAnsweredBy(vehicleIdentifier,
+                                                           message.commandNumber);
+        if (!answered)
+            break;          // a second copy, or an answer to something we did not send
+
+        const VehicleCommandRequest &request = answered->request;
+
         // The answer to the mode change that comes before a launch.
         // Accepted means send the takeoff now. Refused means the
         // launch is over before it started, and the operator hears
         // about it once.
-        if (message.commandNumber == kCommandDoSetMode
-            && m_launchesAwaitingGuidedMode.contains(vehicleIdentifier)) {
-
-            const VehicleCommandRequest launchRequest =
-                m_launchesAwaitingGuidedMode.take(vehicleIdentifier);
-
-            if (message.result == kResultAccepted) {
-                CommandLong takeoff;
-                buildCommandLong(launchRequest.commandName,
-                                 quint8(launchRequest.vehicleIdentifier), takeoff);
-                m_commandsAwaitingAnswer.insert(takeoff.commandNumber, launchRequest);
-                sendCommandLong(takeoff, record);
-            } else {
-                VehicleCommandAcknowledgment refusal;
-                refusal.vehicleIdentifier = launchRequest.vehicleIdentifier;
-                refusal.requestIdentifier = launchRequest.requestIdentifier;
-                refusal.commandName       = launchRequest.commandName;
-                refusal.wasAccepted       = false;
-                refusal.refusalReason     =
-                    QStringLiteral("Vehicle would not switch to Guided mode");
-                emit vehicleCommandAcknowledged(refusal);
+        if (answered->takeoffFollowsModeChange) {
+            if (message.result != kResultAccepted) {
+                refuseCommand(request, QStringLiteral("Vehicle would not switch to Guided mode"));
+                break;
             }
+
+            CommandLong takeoff;
+            buildCommandLong(request.commandName, quint8(request.vehicleIdentifier), takeoff);
+
+            MavlinkCommandsAwaitingAnswer::AwaitedCommand awaitedTakeoff;
+            awaitedTakeoff.request = request;
+            awaitedTakeoff.commandNumber = takeoff.commandNumber;
+            awaitedTakeoff.sentAtMilliseconds = nowMilliseconds;
+            m_commandsAwaitingAnswer.rememberSentCommand(awaitedTakeoff);
+
+            sendCommandLong(takeoff, record);
             break;
         }
 
-        const auto waiting = m_commandsAwaitingAnswer.find(message.commandNumber);
-        if (waiting == m_commandsAwaitingAnswer.end())
-            break;                            // an answer to something we did not send
-
         VehicleCommandAcknowledgment acknowledgment;
-        acknowledgment.vehicleIdentifier = waiting->vehicleIdentifier;
-        acknowledgment.requestIdentifier = waiting->requestIdentifier;
-        acknowledgment.commandName       = waiting->commandName;
+        acknowledgment.vehicleIdentifier = request.vehicleIdentifier;
+        acknowledgment.requestIdentifier = request.requestIdentifier;
+        acknowledgment.commandName       = request.commandName;
         acknowledgment.wasAccepted       = (message.result == kResultAccepted);
 
         switch (message.result) {
@@ -486,7 +528,6 @@ void MavlinkRadioLink::handleFrame(const MavlinkFrame &frame,
         default:                         acknowledgment.refusalReason = QStringLiteral("Refused, reason %1").arg(message.result); break;
         }
 
-        m_commandsAwaitingAnswer.erase(waiting);
         emit vehicleCommandAcknowledged(acknowledgment);
         break;
     }
@@ -512,16 +553,39 @@ void MavlinkRadioLink::publishSitReps()
     }
 }
 
+// Runs every 250 ms. Three jobs, all about time running out:
+//   1. Paths that went quiet, and moving the main path off a quiet one.
+//   2. Vehicles that went quiet on every path.
+//   3. Orders that were never answered.
 void MavlinkRadioLink::checkForVehiclesGoneQuiet()
 {
     const qint64 nowMilliseconds = QDateTime::currentMSecsSinceEpoch();
+
     for (auto it = m_vehicleRecords.begin(); it != m_vehicleRecords.end(); ++it) {
+        it->linkPaths.reviewPaths(nowMilliseconds);
+        reportLinkPathNotices(it.key(), it.value());
+
         if (it->hasBeenReportedLost)
             continue;
         if (nowMilliseconds - it->lastHeardMilliseconds > kQuietForTooLongMilliseconds) {
             it->hasBeenReportedLost = true;
             emit contactLostWithVehicle(it.key());
         }
+    }
+
+    // The ground station has already told the operator "no answer" for
+    // these. Nothing more is sent up. They are dropped here so a later
+    // order of the same kind is not blocked, and so a very late answer
+    // cannot be matched to a newer order.
+    const QList<MavlinkCommandsAwaitingAnswer::AwaitedCommand> expired =
+        m_commandsAwaitingAnswer.takeExpiredCommands(nowMilliseconds);
+    for (const MavlinkCommandsAwaitingAnswer::AwaitedCommand &awaited : expired) {
+        qWarning("MavlinkRadioLink::checkForVehiclesGoneQuiet: vehicle %d never answered "
+                 "command %u (request %d, \"%s\") within %lld ms - no longer waiting for it",
+                 awaited.request.vehicleIdentifier, awaited.commandNumber,
+                 awaited.request.requestIdentifier,
+                 qPrintable(awaited.request.commandName),
+                 MavlinkCommandsAwaitingAnswer::kAnswerWindowMilliseconds);
     }
 }
 
@@ -561,29 +625,17 @@ void MavlinkRadioLink::sendVehicleCommand(VehicleCommandRequest request)
         return;
 
     const auto found = m_vehicleRecords.constFind(request.vehicleIdentifier);
-    if (found == m_vehicleRecords.constEnd() || found->lastSeenPort == 0) {
+    if (found == m_vehicleRecords.constEnd() || !found->linkPaths.mainPath()) {
         // Never heard from this vehicle, so there is nowhere to send.
         // Answering no immediately is better than silence, because the
         // operator is watching a button and waiting.
-        VehicleCommandAcknowledgment refusal;
-        refusal.vehicleIdentifier = request.vehicleIdentifier;
-        refusal.requestIdentifier = request.requestIdentifier;
-        refusal.commandName       = request.commandName;
-        refusal.wasAccepted       = false;
-        refusal.refusalReason     = QStringLiteral("No contact with this vehicle");
-        emit vehicleCommandAcknowledged(refusal);
+        refuseCommand(request, QStringLiteral("No contact with this vehicle"));
         return;
     }
 
     CommandLong command;
     if (!buildCommandLong(request.commandName, quint8(request.vehicleIdentifier), command)) {
-        VehicleCommandAcknowledgment refusal;
-        refusal.vehicleIdentifier = request.vehicleIdentifier;
-        refusal.requestIdentifier = request.requestIdentifier;
-        refusal.commandName       = request.commandName;
-        refusal.wasAccepted       = false;
-        refusal.refusalReason     = QStringLiteral("This link cannot send that command");
-        emit vehicleCommandAcknowledged(refusal);
+        refuseCommand(request, QStringLiteral("This link cannot send that command"));
         return;
     }
 
@@ -598,32 +650,86 @@ void MavlinkRadioLink::sendVehicleCommand(VehicleCommandRequest request)
     // The operator sees none of this. They pressed one button and they
     // get one answer. Which order that answer came from is our
     // bookkeeping, not theirs.
-    if (command.commandNumber == kCommandTakeoff
-        && found->autopilotType == kAutopilotArduPilot
-        && !m_launchesAwaitingGuidedMode.contains(request.vehicleIdentifier)) {
+    const bool launchNeedsGuidedModeFirst =
+        command.commandNumber == kCommandTakeoff
+        && found->autopilotType == kAutopilotArduPilot;
 
+    const quint16 firstCommandNumber =
+        launchNeedsGuidedModeFirst ? kCommandDoSetMode : command.commandNumber;
+
+    // One of each command per vehicle at a time. An answer does not say
+    // which copy it answers, so two copies waiting at once cannot be
+    // told apart. See MavlinkCommandsAwaitingAnswer.
+    //
+    // Emergency stop is never held back. Cutting the motors twice does
+    // the same thing as cutting them once, so a mixed-up answer costs
+    // nothing, and a delay could cost the aircraft.
+    const bool isEmergencyStop = command.commandNumber == kCommandFlightTermination;
+    const bool sameOrderStillWaiting =
+        m_commandsAwaitingAnswer.isWaitingFor(request.vehicleIdentifier, firstCommandNumber)
+        || m_commandsAwaitingAnswer.isWaitingFor(request.vehicleIdentifier, command.commandNumber);
+
+    if (!isEmergencyStop && sameOrderStillWaiting) {
+        refuseCommand(request,
+                      QStringLiteral("The vehicle has not answered the last %1 yet. "
+                                     "Try again in a few seconds.")
+                          .arg(request.commandName));
+        return;
+    }
+
+    MavlinkCommandsAwaitingAnswer::AwaitedCommand awaited;
+    awaited.request = request;
+    awaited.commandNumber = firstCommandNumber;
+    awaited.sentAtMilliseconds = QDateTime::currentMSecsSinceEpoch();
+    awaited.takeoffFollowsModeChange = launchNeedsGuidedModeFirst;
+    m_commandsAwaitingAnswer.rememberSentCommand(awaited);
+
+    if (launchNeedsGuidedModeFirst) {
         CommandLong modeChange;
         modeChange.targetSystem    = quint8(request.vehicleIdentifier);
         modeChange.targetComponent = 1;
         modeChange.commandNumber   = kCommandDoSetMode;
         modeChange.parameter1      = float(kBaseModeCustomModeEnabled);
         modeChange.parameter2      = float(kArduCopterModeGuided);
-
-        m_launchesAwaitingGuidedMode.insert(request.vehicleIdentifier, request);
         sendCommandLong(modeChange, *found);
         return;
     }
 
-    m_commandsAwaitingAnswer.insert(command.commandNumber, request);
     sendCommandLong(command, *found);
 }
 
 void MavlinkRadioLink::sendCommandLong(const CommandLong &command,
                                        const VehicleRecord &record)
 {
+    // Orders go out on the main path only. Sending one order down
+    // every path can deliver it twice.
+    const MavlinkLinkPath *mainPath = record.linkPaths.mainPath();
+    if (!mainPath)
+        return;
+
     sendFrameBytes(MavlinkFrameCodec::encodeFrame(
                        kCommandLong, command.pack(),
                        m_groundSystemIdentifier, 190 /* MAV_COMP_ID_MISSIONPLANNER */,
                        m_outgoingSequenceNumber++),
-                   record.lastSeenAddress, record.lastSeenPort);
+                   mainPath->address(), mainPath->port());
+}
+
+void MavlinkRadioLink::refuseCommand(const VehicleCommandRequest &request,
+                                     const QString &refusalReason)
+{
+    VehicleCommandAcknowledgment refusal;
+    refusal.vehicleIdentifier = request.vehicleIdentifier;
+    refusal.requestIdentifier = request.requestIdentifier;
+    refusal.commandName       = request.commandName;
+    refusal.wasAccepted       = false;
+    refusal.refusalReason     = refusalReason;
+    emit vehicleCommandAcknowledged(refusal);
+}
+
+void MavlinkRadioLink::reportLinkPathNotices(int vehicleIdentifier, VehicleRecord &record)
+{
+    const QList<MavlinkVehicleLinkPaths::LinkPathNotice> notices = record.linkPaths.takeNotices();
+    for (const MavlinkVehicleLinkPaths::LinkPathNotice &notice : notices)
+        emit vehicleLinkPathChanged(vehicleIdentifier, static_cast<int>(notice.severity),
+                                    notice.noticeText);
 }

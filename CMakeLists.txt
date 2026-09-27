@@ -24,6 +24,11 @@ add_subdirectory(mavlink)
 # shares with the ground station is bytes on a socket.
 add_subdirectory(mavlink-vehicle-sim)
 
+# A check that the MAVLink link handles two paths to one vehicle
+# without races. Run mavlink_link_check after changing anything in
+# mavlink/. It prints PASS or FAIL for each check.
+add_subdirectory(mavlink-link-check)
+
 # The practice ground control station. One whole working program,
 # not a lesson. This is the thing to read and to show people.
 add_subdirectory(mini-gcs)

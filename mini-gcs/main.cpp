@@ -122,6 +122,10 @@ int main(int argc, char *argv[])
                      &groundControlStation, &GroundControlStation::noteContactRegainedWithVehicle,
                      Qt::QueuedConnection);
 
+    QObject::connect(radioLink, &RadioLinkInterface::vehicleLinkPathChanged,
+                     &groundControlStation, &GroundControlStation::noteVehicleLinkPathChanged,
+                     Qt::QueuedConnection);
+
     // ---- Wiring, part two: orders going out to the radio ----
     QObject::connect(&groundControlStation, &GroundControlStation::vehicleCommandReadyToSend,
                      radioLink, &RadioLinkInterface::sendVehicleCommand,

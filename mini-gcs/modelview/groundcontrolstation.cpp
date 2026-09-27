@@ -120,6 +120,16 @@ void GroundControlStation::noteContactRegainedWithVehicle(int vehicleIdentifier)
                  QStringLiteral("Back in contact with vehicle %1").arg(vehicleIdentifier));
 }
 
+void GroundControlStation::noteVehicleLinkPathChanged(int vehicleIdentifier,
+                                                      int severityValue,
+                                                      QString noticeText)
+{
+    // The radio decides what happened to its paths. The ground station
+    // only passes the news on to the operator.
+    raiseMessage(static_cast<AlertSeverity>(severityValue),
+                 QStringLiteral("Vehicle %1: %2").arg(QString::number(vehicleIdentifier), noticeText));
+}
+
 void GroundControlStation::requestVehicleCommand(QString commandName)
 {
     if (!m_activeMapVehicle) {

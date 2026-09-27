@@ -45,6 +45,7 @@ public slots:
     void receiveCommandAcknowledgment(VehicleCommandAcknowledgment acknowledgment);
     void noteContactLostWithVehicle(int vehicleIdentifier);
     void noteContactRegainedWithVehicle(int vehicleIdentifier);
+    void noteVehicleLinkPathChanged(int vehicleIdentifier, int severityValue, QString noticeText);
 
     // Orders coming down from the screens.
     void requestVehicleCommand(QString commandName);

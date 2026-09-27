@@ -46,4 +46,11 @@ signals:
     // losing them all.
     void contactLostWithVehicle(int vehicleIdentifier);
     void contactRegainedWithVehicle(int vehicleIdentifier);
+
+    // News about the paths to one vehicle: a backup path appeared, a
+    // path went quiet, or commands moved to a different path. Only a
+    // radio with more than one path to a vehicle sends this.
+    // severityValue is an AlertSeverity, passed as an int so the
+    // queued connection needs no extra type registered.
+    void vehicleLinkPathChanged(int vehicleIdentifier, int severityValue, QString noticeText);
 };

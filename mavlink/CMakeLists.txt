@@ -11,6 +11,16 @@ add_library(mavlink_link STATIC
     mavlinkmessages.cpp
     mavlinkradiolink.h
     mavlinkradiolink.cpp
+
+    # More than one path to the same vehicle
+    mavlinklinkpath.h
+    mavlinklinkpath.cpp
+    mavlinkvehiclelinkpaths.h
+    mavlinkvehiclelinkpaths.cpp
+    mavlinkstalemessagefilter.h
+    mavlinkstalemessagefilter.cpp
+    mavlinkcommandsawaitinganswer.h
+    mavlinkcommandsawaitinganswer.cpp
 )
 
 set_target_properties(mavlink_link PROPERTIES AUTOMOC ON)

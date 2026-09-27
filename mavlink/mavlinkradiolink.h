@@ -5,8 +5,11 @@
 #include <QHostAddress>
 #include <QTimer>
 
+#include "mavlink/mavlinkcommandsawaitinganswer.h"
 #include "mavlink/mavlinkframe.h"
 #include "mavlink/mavlinkmessages.h"
+#include "mavlink/mavlinkstalemessagefilter.h"
+#include "mavlink/mavlinkvehiclelinkpaths.h"
 #include "modelview/radiolinkinterface.h"
 
 class QUdpSocket;
@@ -43,10 +46,23 @@ class QTcpSocket;
 // running picture per vehicle, updates whatever piece just arrived,
 // and sends the whole picture up on a timer.
 //
-// That timer is the coalescing. Messages arrive in the hundreds per
+// That timer is the rate limit. Messages arrive in the hundreds per
 // second across all vehicles. The screen gets twenty updates a second
 // carrying the newest of everything. The thread that draws the window
 // never sees the difference between a quiet link and a loud one.
+//
+// More than one path to the same vehicle:
+//
+// A real aircraft is often heard on two radios and a cell modem at
+// once. All of them can forward to this one UDP port, each from its own
+// address. Three classes keep that from turning into a mess:
+//   MavlinkVehicleLinkPaths    - which paths a vehicle is heard on, and
+//                                which one is the main path
+//   MavlinkStaleMessageFilter  - drops copies and late arrivals, using
+//                                the vehicle's own clock
+//   MavlinkCommandsAwaitingAnswer - matches each answer to the one
+//                                order it belongs to
+// A vehicle is out of contact only when every path is quiet.
 class MavlinkRadioLink : public RadioLinkInterface
 {
     Q_OBJECT
@@ -91,8 +107,11 @@ private:
     struct VehicleRecord
     {
         VehicleSitRep sitRep;
-        QHostAddress lastSeenAddress;
-        quint16      lastSeenPort = 0;
+        MavlinkVehicleLinkPaths linkPaths;
+        MavlinkStaleMessageFilter staleMessageFilter;
+
+        // Last time a frame arrived on ANY path. The vehicle is out of
+        // contact only when this goes stale.
         qint64       lastHeardMilliseconds = 0;
         bool         hasBeenReportedLost = false;
         bool         hasHomePosition = false;
@@ -100,8 +119,6 @@ private:
         double       homeLongitudeDegrees = 0.0;
         bool         hasBeenAskedToStream = false;
         quint8       autopilotType = 0;
-        quint8       lastSequenceNumber = 0;
-        bool         hasSeenAnySequence = false;
     };
 
     void handleFrame(const MavlinkFrame &frame,
@@ -115,14 +132,20 @@ private:
     // Tells a vehicle to start sending telemetry, and how often.
     void requestTelemetryFrom(quint8 targetSystem,
                               quint8 targetComponent,
-                              const QHostAddress &toAddress,
-                              quint16 toPort);
+                              const VehicleRecord &record);
 
     void sendGroundHeartbeat();
 
-    // Packs a CommandLong and puts it on the wire to one vehicle.
+    // Packs a CommandLong and puts it on the wire to one vehicle, on
+    // that vehicle's main path.
     void sendCommandLong(const MavlinkMessage::CommandLong &command,
                          const VehicleRecord &record);
+
+    // Answers an order with no, without sending anything.
+    void refuseCommand(const VehicleCommandRequest &request, const QString &refusalReason);
+
+    // Passes any path news for this vehicle up to the ground station.
+    void reportLinkPathNotices(int vehicleIdentifier, VehicleRecord &record);
 
     void drainReceiveBuffer(const QHostAddress &fromAddress, quint16 fromPort);
 
@@ -152,19 +175,17 @@ private:
     QByteArray  m_receiveBuffer;
     QHash<int, VehicleRecord> m_vehicleRecords;
 
-    // Commands waiting on an answer, so a late answer can be matched to
-    // the order that caused it. Keyed by MAV_CMD number.
-    QHash<quint16, VehicleCommandRequest> m_commandsAwaitingAnswer;
-
-    // A launch order that is waiting on a mode change first. Keyed by
-    // vehicle. See sendVehicleCommand for why launching takes two
-    // steps against ArduPilot.
-    QHash<int, VehicleCommandRequest> m_launchesAwaitingGuidedMode;
+    // Orders that have gone out and not been answered yet.
+    MavlinkCommandsAwaitingAnswer m_commandsAwaitingAnswer;
 
     QTimer m_publishTimer;
     QTimer m_watchdogTimer;
     QTimer m_heartbeatTimer;
 
+    // Frames that failed their check value. This also counts messages
+    // this program has no check table entry for, which on a real
+    // autopilot stream is most of them. Frames LOST on the way are a
+    // different number, kept per path in MavlinkLinkPath.
     int m_badFrameCount = 0;
     int m_framesReceivedCount = 0;
 

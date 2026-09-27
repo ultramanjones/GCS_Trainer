@@ -12,6 +12,13 @@ qt_add_executable(lesson01_telemetry_bar
     src/viewmodel/vehiclemodel.cpp
 )
 
+# The QML file sits in a view folder on disk, but inside the built
+# program it goes at the top of the QML module, the same as in
+# mini-gcs. Without this, Qt 6.8 and later warn (policy QTP0004) that
+# the view folder needs its own qmldir file.
+set_source_files_properties(src/view/Main.qml PROPERTIES
+    QT_RESOURCE_ALIAS Main.qml)
+
 qt_add_qml_module(lesson01_telemetry_bar
     URI GcsTrainerLesson01
     VERSION 1.0
@@ -36,6 +43,9 @@ qt_add_executable(lesson01_telemetry_bar_solution
     solution/viewmodel/vehiclemodel.h
     solution/viewmodel/vehiclemodel.cpp
 )
+
+set_source_files_properties(solution/view/Main.qml PROPERTIES
+    QT_RESOURCE_ALIAS Main.qml)
 
 qt_add_qml_module(lesson01_telemetry_bar_solution
     URI GcsTrainerLesson01Solution
