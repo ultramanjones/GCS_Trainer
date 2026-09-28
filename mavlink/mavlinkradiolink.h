@@ -127,8 +127,6 @@ private:
 
     VehicleRecord &recordFor(int vehicleIdentifier);
 
-    // Pulls whole frames out of the receive buffer and hands them on.
-    // Both transports feed the same buffer and call this.
     // Tells a vehicle to start sending telemetry, and how often.
     void requestTelemetryFrom(quint8 targetSystem,
                               quint8 targetComponent,
@@ -147,6 +145,11 @@ private:
     // Passes any path news for this vehicle up to the ground station.
     void reportLinkPathNotices(int vehicleIdentifier, VehicleRecord &record);
 
+    // Drain means empty it of every complete frame. Pulls whole frames
+    // out of the receive buffer, one after another, and handles each
+    // one. A frame that has only partly arrived stays in the buffer
+    // until the rest of its bytes show up. Both transports feed the
+    // same buffer and call this.
     void drainReceiveBuffer(const QHostAddress &fromAddress, quint16 fromPort);
 
     // Writes finished bytes to whichever socket is open.
