@@ -13,8 +13,8 @@
 // A pretend tail-sitter drone.
 //
 // A tail-sitter takes off straight up like a helicopter, then tips
-// over and flies forward on wings like an airplane. Shield AI builds
-// aircraft that do this.
+// over and flies forward on wings like an airplane. Several military
+// drones fly this way.
 //
 // This object is the aircraft. It does not exist in a real deployment
 // — there it is a physical machine in a field somewhere, and the only

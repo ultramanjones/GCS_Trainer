@@ -1,6 +1,6 @@
 # MAVLink, in plain words
 
-Written for the Shield AI interview. This is the reading, not the code.
+Background notes on the protocol. This is the reading, not the code.
 The code is in `mavlink/` and `mavlink-vehicle-sim/`.
 
 ---
@@ -182,17 +182,14 @@ auto *radioLink = new SimulatedRadioLink(&airspace);
 auto *radioLink = new MavlinkRadioLink(14550);
 ```
 
-Nothing else changes. That is what the seam was for, and it is the
-thing worth saying out loud in an interview — not that you wrote a
-parser, but that the parser could be swapped in without touching a
-line above it.
+Nothing else changes. That is what the seam was for. The parser could
+be swapped in without touching a line above it.
 
 ---
 
 ## What is missing, compared to real QGroundControl
 
-Say these plainly if asked. Knowing the edges of your own work is worth
-more than pretending there are none.
+The known gaps, stated plainly:
 
 - **No signing.** MAVLink 2 can sign frames so a receiver knows they
   came from who they claim. Not implemented here.
@@ -224,5 +221,4 @@ Then Arm, then Launch, then watch it climb and orbit, then Return and
 watch it fly a straight line home and come down.
 
 Kill the vehicle with Ctrl+C mid-flight. The watchdog in the link
-notices at 1.5 seconds and reports contact lost. That is the part worth
-watching, because it is the part that matters in a real one.
+notices at 1.5 seconds and reports contact lost.

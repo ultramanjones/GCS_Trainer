@@ -111,7 +111,7 @@ void MavlinkRadioLink::startListening()
         connect(m_streamSocket, &QTcpSocket::readyRead,
                 this, &MavlinkRadioLink::readPendingStreamBytes);
 
-        // A dial that fails is worth saying out loud. Silence here
+        // A dial that fails must be reported. Silence here
         // looks exactly like a vehicle that is powered off.
         connect(m_streamSocket, &QTcpSocket::errorOccurred, this, [this]() {
             qWarning("MavlinkRadioLink could not reach %s:%u: %s",

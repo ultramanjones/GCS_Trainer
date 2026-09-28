@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 
 find_package(Qt6 REQUIRED COMPONENTS Quick QuickControls2)
 
-# One program. The folders are the four layers from the house rules:
+# One program. The folders are the four layers of the design:
 # view, viewmodel, modelview, model. main.cpp is the composition root
 # and sits beside them, inside none of them.
 qt_add_executable(mini_gcs
@@ -100,7 +100,7 @@ target_link_libraries(mini_gcs PRIVATE
 # running beside it.
 #
 # Nothing above the radio changes either way. That is the point of
-# RadioLinkInterface, and it is worth saying out loud in an interview.
+# RadioLinkInterface.
 option(GCS_USE_MAVLINK_RADIO "Talk MAVLink over UDP instead of the in-memory simulation" OFF)
 
 # How the MAVLink link is plumbed. OFF binds a UDP port and waits,

@@ -34,14 +34,7 @@ in.
 
 ## Step 1. Get the code
 
-The repo is private, so you need to be invited first.
-
-Matt does this part: repo page on GitHub, **Settings**, **Collaborators**,
-**Add people**, type your GitHub username, send.
-
-You will get an email. Accept it. Then:
-
-    git clone https://github.com/<matt's account>/gcs-trainer.git
+    git clone https://github.com/ultramanjones/TeachMeAI.git
 
 ---
 
@@ -205,8 +198,7 @@ If you want the MAVLink details:
 - `mavlink/mavlinkradiolink.cpp` - the socket, the per vehicle state,
   the watchdog, and the command round trip
 
-Other docs: `SITL-SETUP.md` covers the simulator in more depth, and
-`HOW-TO-WIRE-IT-IN.md` covers the build switches.
+Other docs: `SITL-SETUP.md` covers the simulator in more depth.
 
 ---
 

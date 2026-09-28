@@ -4,8 +4,8 @@ import QtQuick.Layouts
 
 // The buttons that send orders to the vehicle.
 //
-// No button is ever grayed out. The house rules say a guardrail
-// advises and never decides. So every button always sends, the
+// No button is ever grayed out. A guardrail should advise, never
+// decide. So every button always sends, the
 // vehicle answers yes or no, and the answer is printed here and in
 // the alert list. The operator is never left guessing why a button
 // would not work.

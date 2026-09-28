@@ -1,62 +1,69 @@
-# GCS Trainer
+# mini-gcs
 
-Hands-on Qt6/QML lessons. Each lesson builds one piece of a small
-ground control station (GCS) for a made-up VTOL drone. This is
-interview practice for a Shield AI "Staff Engineer, Software, GCS –
-C++" role, which asks for Qt/QML plus hands-on QGroundControl work.
+A small ground control station for an unmanned aircraft, written in
+C++ and Qt 6 with a QML front end.
 
-By the end, the lessons add up to a mini-GCS shaped like
-QGroundControl: the same class names (Vehicle, LinkInterface,
-FactGroup, MockLink), the same idea of separating the link from the
-view from the data.
+It shows a live map with the aircraft's track, an artificial horizon,
+a telemetry bar, command buttons with slide-to-confirm, and an alert
+list. It has been flown against ArduPilot's own flight software,
+running in Mission Planner's simulator.
 
-This is not a quiz app. Every lesson is real Qt code, written by hand.
+## What is in it
 
-## The two modes
-
-- **BUILD mode.** Read `LESSON.md`, follow the numbered steps, ask
-  Claude anything. This is where the code gets learned.
-- **DRILL mode.** Read `DRILL.md`. Set a timer. Blank file. No Claude,
-  no browser, compiler allowed. Talk out loud the whole time — the
-  live interview round grades the thinking, not just the code. When
-  the timer ends, show Claude the code. Claude names the gaps and
-  never writes drill code.
-
-## Daily rhythm
-
-1. One drill, timer on, alone, out loud.
-2. Show Claude the drill code. Claude names the gaps. Gaps go on
-   tomorrow's drill.
-3. Then BUILD mode on the next lesson, with Claude's help.
-4. Commit at the end, once it builds and runs. Plain-English message.
-
-## Running a lesson
-
-Open the top-level `CMakeLists.txt` in Qt Creator and pick a target:
-
-- `lesson01_telemetry_bar` — the starter version, with `// TODO`
-  markers where you fill in the lesson's code.
-- `lesson01_telemetry_bar_solution` — the finished, working version.
-  Build and run this one if you want to see the target before you
-  start, or to compare after your own attempt.
+- **A hand-written MAVLink 2 link.** Framing, checksums and messages
+  are written out in `mavlink/`. No MAVLink library is linked in.
+- **Three radios behind one interface.** A simulated aircraft inside
+  the program, real MAVLink over UDP, or real MAVLink over TCP.
+  `RadioLinkInterface` is the only thing the ground station sees, so
+  nothing above the radio changes when the radio does.
+- **The network on its own thread.** The socket, decoding and link
+  timers run on a worker thread. Data reaches the screen only as
+  copies, through queued signals. There are no locks.
+- **Several paths to one aircraft.** Two radios and a cell modem can
+  all reach the same aircraft. One path is the main path for commands,
+  and it moves when that path goes quiet. Copies and late arrivals are
+  dropped using the aircraft's own clock. The aircraft counts as lost
+  only when every path is quiet.
+- **Every command gets an answer.** Each order has a request number
+  and a timeout. The operator always sees accepted, refused with a
+  reason, or no answer.
+- **Honest link loss.** When the link drops, the screen says so. The
+  last position stays on the map, marked as old, and nothing is
+  invented for the time the link was down.
 
 ## Layout
 
 ```
-gcs-trainer/
-  CMakeLists.txt
-  README.md
-  lesson-01-telemetry-bar/
-    LESSON.md          <- the teaching text (BUILD mode)
-    DRILL.md            <- the timed exercise (DRILL mode)
-    CMakeLists.txt
-    src/                <- starter code, TODOs marked
-    solution/           <- finished reference version
-  lesson-02-.../
+mini-gcs/             the ground station
+  main.cpp            builds and connects every object; read this first
+  model/              plain value types: position, attitude, battery, sitrep
+  modelview/          the radio interface, the ground station, the vehicles
+  viewmodel/          organizes data for the screens
+  view/               QML
+mavlink/              the MAVLink link, shared with the vehicle simulator
+mavlink-vehicle-sim/  a separate program that plays the aircraft over UDP
+mavlink-link-check/   a test that plays an aircraft on two paths at once
 ```
 
-Every file in every lesson follows the house rules in
-`Cleere_Programming_Best_Practices.md` (in the planning folder, one
-level up, not in this repo): View → ViewModel → ModelView → Model,
-one composition root, long clear names, no spinners, error logs that
-name the method and the object.
+## Building
+
+Qt 6.5 or newer, with Qt Quick and Qt Quick Controls. Open the top
+`CMakeLists.txt` in Qt Creator and build.
+
+Two CMake options pick the radio:
+
+| GCS_USE_MAVLINK_RADIO | GCS_MAVLINK_TCP | Radio |
+|---|---|---|
+| OFF | - | simulated aircraft, no network |
+| ON | OFF | MAVLink over UDP, listening on port 14550 |
+| ON | ON | MAVLink over TCP to 127.0.0.1:5762 (Mission Planner's simulator) |
+
+Run `mavlink_link_check` after any change in `mavlink/`. It prints PASS
+or FAIL for each check.
+
+## More reading
+
+- `GETTING-STARTED.md` - from nothing to flying it against ArduPilot
+- `SITL-SETUP.md` - the simulator setup in more detail
+- `VVMMVM-REFERENCE.md` - the four-layer design and why it is split that way
+- `MAVLINK-NOTES.md` - the protocol, and what this does not do yet

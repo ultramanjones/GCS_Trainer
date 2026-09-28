@@ -19,3 +19,7 @@ CMakeLists.txt.user.*
 *.pdb
 *.ilk
 out/
+
+# Backups and local-only folders
+*.bak
+lesson-01-telemetry-bar/

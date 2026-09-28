@@ -12,10 +12,6 @@ find_package(Qt6 REQUIRED COMPONENTS Quick QuickControls2)
 # find a module by name and loadFromModule() fails at startup.
 qt_standard_project_setup(REQUIRES 6.5)
 
-# Each lesson is its own program, in its own subfolder, with its own
-# CMakeLists.txt. Add a new lesson by adding one line here.
-add_subdirectory(lesson-01-telemetry-bar)
-
 # The MAVLink link. A small static library, shared by the ground
 # station and the vehicle simulator so both agree about the bytes.
 add_subdirectory(mavlink)
@@ -29,6 +25,5 @@ add_subdirectory(mavlink-vehicle-sim)
 # mavlink/. It prints PASS or FAIL for each check.
 add_subdirectory(mavlink-link-check)
 
-# The practice ground control station. One whole working program,
-# not a lesson. This is the thing to read and to show people.
+# The ground control station itself.
 add_subdirectory(mini-gcs)
