@@ -34,7 +34,7 @@ in.
 
 ## Step 1. Get the code
 
-    git clone https://github.com/ultramanjones/TeachMeAI.git
+    git clone https://github.com/ultramanjones/GCS_Trainer.git
 
 ---
 
