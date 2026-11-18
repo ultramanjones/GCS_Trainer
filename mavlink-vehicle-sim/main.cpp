@@ -148,11 +148,35 @@ private slots:
             if (m_altitudeMeters >= kOrbitAltitude) {
                 m_altitudeMeters = kOrbitAltitude;
                 m_mode = kModeOrbit;
+                m_isFlyingOutToOrbit = true;
             }
             break;
 
         case kModeOrbit: {
-            // Fly a circle of fixed radius around home.
+            // First fly straight out to the edge of the circle. Without
+            // this leg the drone jumps from home to the circle in one step.
+            if (m_isFlyingOutToOrbit) {
+                const double orbitStartEast  = kOrbitRadiusMeters * std::sin(m_orbitAngleRadians);
+                const double orbitStartNorth = kOrbitRadiusMeters * std::cos(m_orbitAngleRadians);
+                const double eastToGo  = orbitStartEast  - m_eastMeters;
+                const double northToGo = orbitStartNorth - m_northMeters;
+                const double distanceToGo = std::hypot(eastToGo, northToGo);
+                const double stepMeters = kCruiseSpeed * kStepSeconds;
+                if (distanceToGo <= stepMeters) {
+                    m_eastMeters  = orbitStartEast;
+                    m_northMeters = orbitStartNorth;
+                    m_isFlyingOutToOrbit = false;
+                    break;
+                }
+                m_eastMeters  += (eastToGo  / distanceToGo) * stepMeters;
+                m_northMeters += (northToGo / distanceToGo) * stepMeters;
+                m_headingDegrees = std::fmod(qRadiansToDegrees(
+                    std::atan2(eastToGo, northToGo)) + 360.0, 360.0);
+                m_rollDegrees = 0.0;          // wings level on the straight leg
+                break;
+            }
+
+            // Then fly a circle of fixed radius around home.
             m_orbitAngleRadians += (kCruiseSpeed / kOrbitRadiusMeters) * kStepSeconds;
             m_eastMeters  = kOrbitRadiusMeters * std::sin(m_orbitAngleRadians);
             m_northMeters = kOrbitRadiusMeters * std::cos(m_orbitAngleRadians);
@@ -197,6 +221,10 @@ private slots:
     void sendHeartbeat()
     {
         Heartbeat beat;
+        // This program is not ArduPilot, so it must not say it is. The
+        // ground station reads this to pick the mode names and to decide
+        // whether launch needs Guided mode first.
+        beat.autopilotType = 0;   // MAV_AUTOPILOT_GENERIC
         beat.customMode   = m_mode;
         beat.baseMode     = m_isArmed ? Heartbeat::kArmedFlag : 0;
         beat.systemStatus = m_isArmed ? 4 /* ACTIVE */ : 3 /* STANDBY */;
@@ -275,6 +303,7 @@ private:
     qint64  m_bootTime = 0;
 
     quint32 m_mode = kModeStandby;
+    bool    m_isFlyingOutToOrbit = false;
     bool    m_isArmed = false;
     bool    m_descendFast = false;
     double  m_eastMeters = 0.0;
