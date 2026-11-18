@@ -25,9 +25,17 @@ void appendFloat(QByteArray &bytes, float value)
 template <typename T>
 T readLittleEndian(const QByteArray &bytes, int offset)
 {
-    if (offset + int(sizeof(T)) > bytes.size())
-        return T{};                       // short payload, treat the rest as zero
-    return qFromLittleEndian<T>(reinterpret_cast<const uchar *>(bytes.constData()) + offset);
+    // Version 2 drops trailing zero bytes, and the cut can land in the
+    // middle of a field. 60 meters is 60000 millimeters, bytes 60 EA 00
+    // 00, so the last two go. Copy whatever bytes did arrive into a
+    // zeroed buffer. The missing high bytes were zero, so the number
+    // comes out right. Returning zero for the whole field here once
+    // showed a climbing drone at 0 meters.
+    uchar fieldBytes[sizeof(T)] = {};
+    const int bytesAvailable = qBound(0, int(bytes.size()) - offset, int(sizeof(T)));
+    if (bytesAvailable > 0)
+        std::memcpy(fieldBytes, bytes.constData() + offset, size_t(bytesAvailable));
+    return qFromLittleEndian<T>(fieldBytes);
 }
 
 float readFloat(const QByteArray &bytes, int offset)
