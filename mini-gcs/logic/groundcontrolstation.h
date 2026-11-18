@@ -18,7 +18,7 @@ class RadioLinkInterface;
 // sitting on the table, and it exists as an object even with one
 // aircraft, because that is what it is in reality.
 //
-// This lives in the modelview layer, not the viewmodel layer, because
+// This lives in the logic layer, not the viewmodel layer, because
 // it holds state that outlives any screen. Close every panel and the
 // ground station is still tracking the aircraft.
 //

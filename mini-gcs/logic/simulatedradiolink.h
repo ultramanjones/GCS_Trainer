@@ -3,7 +3,7 @@
 #include <QHash>
 #include <QTimer>
 
-#include "modelview/radiolinkinterface.h"
+#include "logic/radiolinkinterface.h"
 
 class SimulatedAirspace;
 

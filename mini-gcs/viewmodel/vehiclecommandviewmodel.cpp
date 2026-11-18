@@ -1,7 +1,7 @@
 #include "viewmodel/vehiclecommandviewmodel.h"
 
 #include "model/vehiclecommand.h"
-#include "modelview/groundcontrolstation.h"
+#include "logic/groundcontrolstation.h"
 
 VehicleCommandViewModel::VehicleCommandViewModel(GroundControlStation *groundControlStation,
                                                  QObject *parent)

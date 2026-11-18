@@ -2,8 +2,8 @@
 
 #include <QtMath>
 
-#include "modelview/groundcontrolstation.h"
-#include "modelview/mapvehicle.h"
+#include "logic/groundcontrolstation.h"
+#include "logic/mapvehicle.h"
 
 VehicleStatusViewModel::VehicleStatusViewModel(GroundControlStation *groundControlStation,
                                                QObject *parent)

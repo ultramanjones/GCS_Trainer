@@ -1,4 +1,4 @@
-#include "modelview/mapvehicle.h"
+#include "logic/mapvehicle.h"
 
 #include <QDateTime>
 #include <QtMath>

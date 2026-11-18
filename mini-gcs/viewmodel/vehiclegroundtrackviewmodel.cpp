@@ -1,7 +1,7 @@
 #include "viewmodel/vehiclegroundtrackviewmodel.h"
 
-#include "modelview/groundcontrolstation.h"
-#include "modelview/mapvehicle.h"
+#include "logic/groundcontrolstation.h"
+#include "logic/mapvehicle.h"
 
 VehicleGroundTrackViewModel::VehicleGroundTrackViewModel(GroundControlStation *groundControlStation,
                                                          QObject *parent)

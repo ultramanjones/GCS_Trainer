@@ -1,6 +1,6 @@
 #pragma once
 
-#include "modelview/flightpattern.h"
+#include "logic/flightpattern.h"
 
 // A racetrack: up one side, turn all the way around, down the other
 // side, turn around again, forever.

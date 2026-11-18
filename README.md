@@ -37,7 +37,7 @@ running in Mission Planner's simulator.
 mini-gcs/             the ground station
   main.cpp            builds and connects every object; read this first
   model/              plain value types: position, attitude, battery, sitrep
-  modelview/          the radio interface, the ground station, the vehicles
+  logic/              the radio interface, the ground station, the vehicles
   viewmodel/          organizes data for the screens
   view/               QML
 mavlink/              the MAVLink link, shared with the vehicle simulator
@@ -65,5 +65,5 @@ or FAIL for each check.
 
 - `GETTING-STARTED.md` - from nothing to flying it against ArduPilot
 - `SITL-SETUP.md` - the simulator setup in more detail
-- `VVMMVM-REFERENCE.md` - the four-layer design and why it is split that way
+- `VVMLM-REFERENCE.md` - the four-layer design and why it is split that way
 - `MAVLINK-NOTES.md` - the protocol, and what this does not do yet

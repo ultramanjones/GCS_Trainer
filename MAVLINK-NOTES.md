@@ -167,7 +167,7 @@ everything above it — viewmodel, view — only ever sees a
 ```
 view/            QML. Knows nothing about radios.
 viewmodel/       Qt objects the QML binds to.
-modelview/       SimulatedRadioLink  <- fake, all in memory
+logic/           SimulatedRadioLink  <- fake, all in memory
                  MavlinkRadioLink    <- real frames over UDP
 model/           plain value types. No Qt objects.
 ```

@@ -10,7 +10,7 @@
 #include "mavlink/mavlinkmessages.h"
 #include "mavlink/mavlinkstalemessagefilter.h"
 #include "mavlink/mavlinkvehiclelinkpaths.h"
-#include "modelview/radiolinkinterface.h"
+#include "logic/radiolinkinterface.h"
 
 class QUdpSocket;
 class QTcpSocket;

@@ -1,8 +1,8 @@
-#include "modelview/simulatedvehicle.h"
+#include "logic/simulatedvehicle.h"
 
 #include <QtMath>
 
-#include "modelview/racetrackflightpattern.h"
+#include "logic/racetrackflightpattern.h"
 
 SimulatedVehicle::SimulatedVehicle(int vehicleIdentifier)
     : m_vehicleIdentifier(vehicleIdentifier)

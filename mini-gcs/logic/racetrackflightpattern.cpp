@@ -1,4 +1,4 @@
-#include "modelview/racetrackflightpattern.h"
+#include "logic/racetrackflightpattern.h"
 
 #include <QtMath>
 

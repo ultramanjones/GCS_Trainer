@@ -184,7 +184,7 @@ Start the simulator again and contact comes back.
 
 If you only have twenty minutes:
 
-- `VVMMVM-REFERENCE.md` - the architecture, and what the radio swap
+- `VVMLM-REFERENCE.md` - the architecture, and what the radio swap
   proved about it
 - `mini-gcs/main.cpp` - every object in the program is built and wired
   here and nowhere else. Read this one file and you know the system.

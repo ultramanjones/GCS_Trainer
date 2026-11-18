@@ -1,9 +1,9 @@
-#include "modelview/groundcontrolstation.h"
+#include "logic/groundcontrolstation.h"
 
 #include <QDebug>
 
-#include "modelview/mapvehicle.h"
-#include "modelview/radiolinkinterface.h"
+#include "logic/mapvehicle.h"
+#include "logic/radiolinkinterface.h"
 
 GroundControlStation::GroundControlStation(RadioLinkInterface *radioLink, QObject *parent)
     : QObject(parent)

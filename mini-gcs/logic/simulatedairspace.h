@@ -8,7 +8,7 @@
 
 #include "model/vehiclecommand.h"
 #include "model/vehiclesitrep.h"
-#include "modelview/simulatedvehicle.h"
+#include "logic/simulatedvehicle.h"
 
 // Everything that is out there.
 //

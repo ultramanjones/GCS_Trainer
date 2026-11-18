@@ -27,7 +27,7 @@ set_target_properties(mavlink_link PROPERTIES AUTOMOC ON)
 
 # The link implements RadioLinkInterface and builds a VehicleSitRep, so
 # it needs to see mini-gcs headers. Include from the project root so
-# the include lines read "model/..." and "modelview/..." the same way
+# the include lines read "model/..." and "logic/..." the same way
 # they do everywhere else.
 target_include_directories(mavlink_link PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/..

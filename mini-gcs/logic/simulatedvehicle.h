@@ -8,7 +8,7 @@
 #include "model/vehiclecommand.h"
 #include "model/vehicleposition.h"
 #include "model/vehiclesitrep.h"
-#include "modelview/flightpattern.h"
+#include "logic/flightpattern.h"
 
 // A pretend tail-sitter drone.
 //

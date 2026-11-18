@@ -8,7 +8,7 @@ qt_add_executable(mavlink_link_check
 
     # The link is built against the ground station's interface and
     # value types, so the check needs them too.
-    ../mini-gcs/modelview/radiolinkinterface.h
+    ../mini-gcs/logic/radiolinkinterface.h
     ../mini-gcs/model/vehicleposition.cpp
     ../mini-gcs/model/vehicleattitude.cpp
     ../mini-gcs/model/vehiclebattery.cpp

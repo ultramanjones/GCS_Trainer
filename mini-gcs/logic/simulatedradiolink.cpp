@@ -1,9 +1,9 @@
-#include "modelview/simulatedradiolink.h"
+#include "logic/simulatedradiolink.h"
 
 #include <QDateTime>
 #include <QDebug>
 
-#include "modelview/simulatedairspace.h"
+#include "logic/simulatedairspace.h"
 
 SimulatedRadioLink::SimulatedRadioLink(SimulatedAirspace *simulatedAirspace, QObject *parent)
     : RadioLinkInterface(parent)

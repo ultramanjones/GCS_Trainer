@@ -1,4 +1,4 @@
-#include "modelview/simulatedairspace.h"
+#include "logic/simulatedairspace.h"
 
 #include <QDebug>
 

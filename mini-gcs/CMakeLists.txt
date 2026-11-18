@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.21)
 find_package(Qt6 REQUIRED COMPONENTS Quick QuickControls2)
 
 # One program. The folders are the four layers of the design:
-# view, viewmodel, modelview, model. main.cpp is the composition root
+# view, viewmodel, logic, model. main.cpp is the composition root
 # and sits beside them, inside none of them.
 qt_add_executable(mini_gcs
     main.cpp
@@ -20,25 +20,25 @@ qt_add_executable(mini_gcs
     model/vehiclecommand.h
     model/vehiclealert.h
 
-    # ModelView — the far end of the radio
-    modelview/flightpattern.h
-    modelview/racetrackflightpattern.h
-    modelview/racetrackflightpattern.cpp
-    modelview/simulatedvehicle.h
-    modelview/simulatedvehicle.cpp
-    modelview/simulatedairspace.h
-    modelview/simulatedairspace.cpp
+    # Logic — the far end of the radio
+    logic/flightpattern.h
+    logic/racetrackflightpattern.h
+    logic/racetrackflightpattern.cpp
+    logic/simulatedvehicle.h
+    logic/simulatedvehicle.cpp
+    logic/simulatedairspace.h
+    logic/simulatedairspace.cpp
 
-    # ModelView — the radio itself
-    modelview/radiolinkinterface.h
-    modelview/simulatedradiolink.h
-    modelview/simulatedradiolink.cpp
+    # Logic — the radio itself
+    logic/radiolinkinterface.h
+    logic/simulatedradiolink.h
+    logic/simulatedradiolink.cpp
 
-    # ModelView — the ground
-    modelview/mapvehicle.h
-    modelview/mapvehicle.cpp
-    modelview/groundcontrolstation.h
-    modelview/groundcontrolstation.cpp
+    # Logic — the ground
+    logic/mapvehicle.h
+    logic/mapvehicle.cpp
+    logic/groundcontrolstation.h
+    logic/groundcontrolstation.cpp
 
     # ViewModel — organizes for the screen, calculates nothing
     viewmodel/vehiclestatusviewmodel.h

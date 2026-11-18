@@ -1,6 +1,6 @@
-# VVMMVM, with a working program to read
+# VVMLM, with a working program to read
 
-**View - ViewModel - ModelView - Model**
+**View - ViewModel - Logic - Model**
 
 The name is a mirror. The two middle words are the same two words
 turned around. That is on purpose: each inner layer is the adapter that
@@ -41,7 +41,7 @@ out its own latitude and its own distance home without asking anything
 else. That is what a model layer is for. The knowledge lives with the
 data.
 
-### ModelView
+### Logic
 
 The far end, and the truth kept about it. What the program KNOWS.
 
@@ -51,14 +51,14 @@ the spaghetti starts. It holds two different kinds of thing:
 The device edge - the radio, the socket, the protocol. Whatever is
 actually out there.
 
-    modelview/radiolinkinterface.h    the seam. a pure interface
-    modelview/simulatedradiolink.h    a fake radio, all in memory
+    logic/radiolinkinterface.h        the seam. a pure interface
+    logic/simulatedradiolink.h        a fake radio, all in memory
     mavlink/mavlinkradiolink.h        a real one, MAVLink over the wire
 
 And the program's own running picture, which outlives any window:
 
-    modelview/mapvehicle.h            what we believe about one aircraft
-    modelview/groundcontrolstation.h  the station itself, owns the radio
+    logic/mapvehicle.h                what we believe about one aircraft
+    logic/groundcontrolstation.h      the station itself, owns the radio
 
 `MapVehicle` is the one to study. It is not the aircraft. It is the
 picture of the aircraft, built only out of messages that arrived. And
@@ -112,7 +112,7 @@ truth about the aircraft dies when a window closes. Or it ends up on
 the link class, and now swapping the radio means rewriting what the
 program believes.
 
-VVMMVM says: it lives in the ModelView layer, alongside the device
+VVMLM says: it lives in the Logic layer, alongside the device
 edge, built out of Model value types. That is the whole rule, and it is
 the one that keeps the radio from reaching up into the screen.
 
@@ -124,8 +124,8 @@ the one that keeps the radio from reaching up into the screen.
    program is built here and wired here. Nowhere else. Read this one
    file and you know the whole system.
 2. `model/vehiclesitrep.h` - what moves between the layers.
-3. `modelview/radiolinkinterface.h` - the seam.
-4. `modelview/mapvehicle.h` - the truth that is kept.
+3. `logic/radiolinkinterface.h` - the seam.
+4. `logic/mapvehicle.h` - the truth that is kept.
 5. `viewmodel/vehiclestatusviewmodel.h` - the shape the screen wants.
 6. `view/TelemetryStatusBar.qml` - pixels.
 
@@ -153,7 +153,7 @@ an autopilot. The autopilot.
 
 Going from one to three:
 
-- A new class in the ModelView layer implementing `RadioLinkInterface`.
+- A new class in the Logic layer implementing `RadioLinkInterface`.
 - One block in `main.cpp`, the composition root, choosing which one to
   build.
 
@@ -164,7 +164,7 @@ That is all.
 - Every file in `model/`. Not one line.
 - Every file in `viewmodel/`. Not one line.
 - Every file in `view/`. Not one line.
-- `MapVehicle` and `GroundControlStation`, the rest of the ModelView
+- `MapVehicle` and `GroundControlStation`, the rest of the Logic
   layer. Not one line.
 
 Roughly three thousand lines above the seam went from a make believe
@@ -195,7 +195,7 @@ See `SITL-SETUP.md` for how to run the third one.
 
 ## What the seam actually is
 
-`modelview/radiolinkinterface.h`. It is small on purpose:
+`logic/radiolinkinterface.h`. It is small on purpose:
 
     public slots:
         virtual void startListening() = 0;
@@ -230,7 +230,7 @@ shared by pointer. That is deliberate - shared pointers across threads
 is how you get a race - but it is not free.
 
 **Discipline.** The pattern gives you nothing if one viewmodel reaches
-straight past the ModelView layer to the socket "just this once." The
+straight past the Logic layer to the socket "just this once." The
 first shortcut is the end of it.
 
 It pays off when the hardware changes, when the UI gets rewritten, when
@@ -247,7 +247,7 @@ called hexagonal architecture, lands in a similar place. MVVM with a
 hard boundary at the device edge is a known arrangement. Clean
 architecture argues the same direction.
 
-What VVMMVM does is name the fourth layer out loud and say what belongs
+What VVMLM does is name the fourth layer out loud and say what belongs
 in it. Most people nod at MVVM and then let the device talk straight to
 the viewmodel, because nothing in the name told them not to. Naming the
 layer is the thing that makes the rule stick, and a rule people
@@ -262,7 +262,7 @@ Six questions. If all six have clean answers, the layers are right.
 1. Can I test this value type with no program running? It belongs in
    Model.
 2. Does this fact have to survive a window closing? It belongs in
-   ModelView.
+   Logic.
 3. Does this class know what a socket is? Then it is the device edge,
    and nothing above it may know.
 4. Is this object formatting or naming something for a person to read?
