@@ -1,5 +1,9 @@
 # mini-gcs
 
+[![Watch the video: one app, three data sources](https://img.youtube.com/vi/vTIrVjbMSew/hqdefault.jpg)](https://youtu.be/vTIrVjbMSew)
+
+A short video (under two minutes) on how this is built and how it switched from a built-in simulator to MAVLink to real ArduPilot without changing the rest of the app.
+
 A small ground control station for an unmanned aircraft, written in
 C++ and Qt 6 with a QML front end.
 
